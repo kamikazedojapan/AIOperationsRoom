@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from pathlib import Path
+from datetime import datetime, timezone
 
 from backend.adapters.openai_agents import normalize_openai_agent_event
 from backend.config import events_path
+from backend.events_contract import EventName, EventSource
 from backend.task_runner import ProviderResult, TaskCancelled
 
 
@@ -74,19 +75,27 @@ def _append_global_event(event: dict) -> None:
 
 
 def _record_deleted_session(session_id: str, emit) -> None:
-    payload = {
-        "type": "agent.session.deleted",
-        "event_id": f"openai:delete:{session_id}:{uuid.uuid4()}",
+    """Record a successful local DELETE call as a normalized session finish.
+
+    The Agents API does not emit a deletion webhook/stream event. This is therefore
+    an observation made by the Operations Room client after the DELETE succeeds,
+    not a provider-emitted lifecycle event.
+    """
+    event = {
+        "id": f"openai:delete:{session_id}:{uuid.uuid4()}",
+        "evento": EventName.SESSION_FINISHED,
+        "source": EventSource.OPENAI_API,
+        "source_event": "client.session.delete",
         "session_id": session_id,
+        "t": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "reason": "deleted",
     }
-    event = normalize_openai_agent_event(payload)
-    if event is not None:
-        _append_global_event(event)
-        emit(
-            "provider.lifecycle",
-            source_event="agent.session.deleted",
-            data={"event": event["evento"], "provider_session_id": session_id},
-        )
+    _append_global_event(event)
+    emit(
+        "provider.lifecycle",
+        source_event="client.session.delete",
+        data={"event": event["evento"], "provider_session_id": session_id},
+    )
 
 
 class OpenAIAgentsProvider:
