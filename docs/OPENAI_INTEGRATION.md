@@ -8,7 +8,7 @@ Why this surface:
 - it provides an official live event stream;
 - it exposes subagent lifecycle events;
 - it supports OpenAI-hosted execution environments;
-- it can later back the Agent Console without coupling the core state machine to OpenAI-specific names.
+- it can back Agent Console without coupling the core state machine to OpenAI-specific names.
 
 The ordinary ChatGPT product is **not** treated as an observable runtime. AI Operations Room does not assume access to private ChatGPT conversation lifecycle events.
 
@@ -27,8 +27,16 @@ Output text deltas, reasoning text and other content events are not written into
 
 Failure/cancellation events are handled by the Task Runner status model. They are not currently projected into the global event contract because that contract does not yet define provider-neutral failure/cancellation facts.
 
+## Session cleanup
+
+Agent Console currently uses one managed OpenAI Agent session per task. Unless `AI_OPERATIONS_ROOM_KEEP_OPENAI_SESSIONS=1` is set, the provider deletes that session after the run.
+
+Session deletion is **not** represented as a provider-emitted event. The Agents API does not emit a deletion stream/webhook event for this operation. After the local DELETE call succeeds, Operations Room records its own observation with `source_event = client.session.delete` and projects `session.finished`. This keeps the distinction between facts emitted by OpenAI and facts observed from our own successful API action explicit.
+
 ## Runtime requirements
 
 A real Agent Console execution requires `OPENAI_API_KEY` with the permissions required by the Agents API. The OpenAI Python SDK adds the Agents beta header automatically.
 
-The default model is configurable through `AI_OPERATIONS_ROOM_OPENAI_MODEL`; the Task Runner provides the actual default.
+The default model is configurable through `AI_OPERATIONS_ROOM_OPENAI_MODEL`; the current Task Runner default is `gpt-6-astra`.
+
+Selecting a project in Agent Console associates local metadata only. It does not upload or mount the local project directory in the OpenAI-hosted environment.
