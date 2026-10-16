@@ -3,6 +3,7 @@ const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[char]));
 const states = { trabalhando: 'Trabalhando', delegando: 'Delegando', aguardando: 'Aguardando', concluida: 'Concluída', orfa: 'Órfã' };
+const sourceLabels = { claude_code: 'Claude Code', codex: 'Codex', openai_api: 'OpenAI API' };
 let projects = [];
 let sessions = [];
 let dashboard = { execucoes: [], resumo: {} };
@@ -20,6 +21,7 @@ async function request(method, path, body) {
 
 function notice(message, error = false) { const target = $('#notice'); target.textContent = message; target.classList.toggle('error', error); target.hidden = false; }
 function openProject(project = null, path = '') { editingId = project?.id ?? null; $('#dialog-title').textContent = project ? 'Editar projeto' : 'Novo projeto'; $('#dialog-help').textContent = project ? 'A mudança da pasta atualiza as associações existentes.' : 'Escolha um nome curto para identificar a sala.'; $('#project-name').value = project?.nome ?? ''; $('#project-path').value = path || project?.caminho_local || ''; $('#project-dialog').showModal(); $('#project-name').focus(); }
+function sourceName(source) { return sourceLabels[source] || source || 'Origem desconhecida'; }
 
 function visualId(value) {
   let hash = 2166136261;
@@ -37,6 +39,8 @@ function officeData() {
     visualRuns.set(String(id), run);
     room.execucoes.push({
       id,
+      source: run.source,
+      session_key: run.session_key,
       session_id: run.session_id,
       agent_id: run.agent_id,
       tipo_agente: run.agent_id ? run.tipo : 'principal',
@@ -64,7 +68,7 @@ function renderRoom() {
   const room = $('#office-room');
   if (viewMode === 'panel') {
     if (window.EscritorioPixel?.montado()) window.EscritorioPixel.destruir();
-    room.innerHTML = `<div class="panel-table" role="region" aria-label="Painel de execuções"><table><thead><tr><th>Agente</th><th>Projeto</th><th>Estado</th><th>Atualização</th></tr></thead><tbody>${(dashboard.historico || []).map((run) => `<tr data-session="${esc(run.session_id)}" tabindex="0"><td>${esc(run.tipo)}</td><td>${esc(run.projeto_nome || run.cwd || 'Sem projeto')}</td><td>${esc(states[run.estado] || run.estado)}</td><td>${esc(new Date(run.atualizado_em).toLocaleString('pt-BR'))}</td></tr>`).join('') || '<tr><td colspan="4">Nenhuma execução no período.</td></tr>'}</tbody></table></div>`;
+    room.innerHTML = `<div class="panel-table" role="region" aria-label="Painel de execuções"><table><thead><tr><th>Agente</th><th>Origem</th><th>Projeto</th><th>Estado</th><th>Atualização</th></tr></thead><tbody>${(dashboard.historico || []).map((run) => `<tr data-source="${esc(run.source)}" data-session="${esc(run.session_id)}" tabindex="0"><td>${esc(run.tipo)}</td><td>${esc(sourceName(run.source))}</td><td>${esc(run.projeto_nome || run.cwd || 'Sem projeto')}</td><td>${esc(states[run.estado] || run.estado)}</td><td>${esc(new Date(run.atualizado_em).toLocaleString('pt-BR'))}</td></tr>`).join('') || '<tr><td colspan="5">Nenhuma execução no período.</td></tr>'}</tbody></table></div>`;
     return;
   }
   const data = officeData();
@@ -77,12 +81,13 @@ function renderRoom() {
   else window.EscritorioPixel?.montar(room, data, { historico: () => dashboard.historico_tipos || {}, trajeto: () => $('#show-route')?.checked });
 }
 
-async function selectSession(sessionId) {
-  selected = sessionId;
+async function selectSession(source, sessionId) {
+  selected = `${source}:${sessionId}`;
   renderRoom();
-  const [agents, history] = await Promise.all([request('GET', `/sessoes/${encodeURIComponent(sessionId)}/agentes`), request('GET', `/sessoes/${encodeURIComponent(sessionId)}/historico`)]);
+  const prefix = `/sessoes/${encodeURIComponent(source)}/${encodeURIComponent(sessionId)}`;
+  const [agents, history] = await Promise.all([request('GET', `${prefix}/agentes`), request('GET', `${prefix}/historico`)]);
   const main = agents.agentes.find((agent) => !agent.pai_chave);
-  $('#details').innerHTML = `<h2>${esc(main?.tipo || 'Sessão')}</h2><p class="status">${esc(states[main?.estado] || '')}</p><p class="detail-path">${esc(main?.cwd || '')}</p><h3>Agentes</h3><ul class="agent-list">${agents.agentes.map((agent) => `<li><span>${esc(agent.tipo)}</span><small>${esc(states[agent.estado])}</small></li>`).join('') || '<li>Nenhum agente registrado.</li>'}</ul><h3>Histórico</h3><ol class="history">${history.eventos.map((event) => `<li><span>${esc(event.nome)}</span><time>${esc(new Date(event.ocorrido_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}</time></li>`).join('') || '<li>Sem eventos.</li>'}</ol>`;
+  $('#details').innerHTML = `<h2>${esc(main?.tipo || 'Sessão')}</h2><p class="status">${esc(states[main?.estado] || '')}</p><p><span class="badge">${esc(sourceName(main?.source || source))}</span></p><p class="detail-path">${esc(main?.cwd || '')}</p><h3>Agentes</h3><ul class="agent-list">${agents.agentes.map((agent) => `<li><span>${esc(agent.tipo)}</span><small>${esc(states[agent.estado])}</small></li>`).join('') || '<li>Nenhum agente registrado.</li>'}</ul><h3>Histórico</h3><ol class="history">${history.eventos.map((event) => `<li><span>${esc(event.nome)}</span><time>${esc(new Date(event.ocorrido_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}</time></li>`).join('') || '<li>Sem eventos.</li>'}</ol>`;
   $('#details-modal').innerHTML = $('#details').innerHTML;
   $('#details-dialog').showModal();
 }
@@ -106,16 +111,16 @@ $('#project-form').addEventListener('submit', async (event) => { event.preventDe
 $('#office-room').addEventListener('click', (event) => {
   const person = event.target.closest('.pessoa');
   const run = person && visualRuns.get(person.dataset.id);
-  if (run) return selectSession(run.session_id).catch((error) => notice(error.message, true));
+  if (run) return selectSession(run.source, run.session_id).catch((error) => notice(error.message, true));
   const card = event.target.closest('[data-session]');
-  if (card) selectSession(card.dataset.session).catch((error) => notice(error.message, true));
+  if (card) selectSession(card.dataset.source, card.dataset.session).catch((error) => notice(error.message, true));
 });
 $('#office-room').addEventListener('keydown', (event) => {
   if (!['Enter', ' '].includes(event.key)) return;
   const row = event.target.closest('tr[data-session]');
   if (!row) return;
   event.preventDefault();
-  selectSession(row.dataset.session).catch((error) => notice(error.message, true));
+  selectSession(row.dataset.source, row.dataset.session).catch((error) => notice(error.message, true));
 });
 document.addEventListener('click', async (event) => { const button = event.target.closest('button[data-action]'); if (!button) return; const action = button.dataset.action; const path = button.dataset.path; const project = projects.find((item) => item.id === Number(button.dataset.id)); try { if (action === 'create') return openProject(null, path); if (action === 'edit') return openProject(project); if (action === 'map') { const options = projects.filter((item) => !item.arquivado); const choice = prompt(`Número do projeto:\n${options.map((item) => `${item.id} — ${item.nome}`).join('\n')}`); const target = options.find((item) => item.id === Number(choice)); if (!target || !confirm(`Substituir a pasta de "${target.nome}"?`)) return; await request('PUT', `/projetos/${target.id}`, { nome: target.nome, caminho_local: path }); } else if (action === 'archive' && project) await request('POST', `/projetos/${project.id}/${project.arquivado ? 'desarquivar' : 'arquivar'}`); else if (action === 'delete' && project && confirm(`Remover "${project.nome}"?`)) await request('DELETE', `/projetos/${project.id}`); await refresh(); } catch (error) { notice(error.message, true); } });
 document.querySelector('.alternador').insertAdjacentHTML('afterend', '<label class="trajeto"><input id="show-route" type="checkbox"> Mostrar trajeto</label><label class="periodo">Período do histórico<select id="history-period" aria-label="Período do histórico"><option value="6">últimas 6 h</option><option value="12">últimas 12 h</option><option value="24">últimas 24 h</option></select></label>');

@@ -1,4 +1,4 @@
-"""Reconcile open executions against Claude Code's local process registry."""
+"""Reconcile Claude Code executions against its local process registry."""
 
 from __future__ import annotations
 
@@ -10,10 +10,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.config import data_dir
+from backend.events_contract import EventSource
 
 
 def sessions_dir() -> Path:
-    return Path(os.environ.get("AI_OPERATIONS_ROOM_SESSIONS_DIR") or Path.home() / ".claude" / "sessions")
+    return Path(
+        os.environ.get("AI_OPERATIONS_ROOM_SESSIONS_DIR")
+        or Path.home() / ".claude" / "sessions"
+    )
 
 
 def process_alive(pid: object) -> bool:
@@ -47,6 +51,7 @@ def process_alive(pid: object) -> bool:
 
 
 def living_sessions() -> dict[str, bool]:
+    """Return Claude Code native session IDs and whether their process is alive."""
     found: dict[str, bool] = {}
     folder = sessions_dir()
     if not folder.is_dir():
@@ -63,19 +68,30 @@ def living_sessions() -> dict[str, bool]:
     return found
 
 
-def reconcile(con: sqlite3.Connection, *, living: dict[str, bool] | None = None,
-              now: datetime | None = None) -> int:
-    """Close all active runs in a dead session; unknown sessions expire after ten minutes."""
+def reconcile(
+    con: sqlite3.Connection,
+    *,
+    living: dict[str, bool] | None = None,
+    now: datetime | None = None,
+) -> int:
+    """Reconcile only Claude Code runs; other providers own their lifecycle checks."""
     living = living_sessions() if living is None else living
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=10)
     demo_mode = (data_dir() / ".demo-mode").exists()
     rows = con.execute(
-        "SELECT session_id, MAX(atualizado_em) AS ultimo FROM execucao GROUP BY session_id"
+        """
+        SELECT session_key, session_id, MAX(atualizado_em) AS ultimo
+        FROM execucao
+        WHERE source = ?
+        GROUP BY session_key, session_id
+        """,
+        (EventSource.CLAUDE_CODE.value,),
     ).fetchall()
-    dead = []
+    dead: list[tuple[str, str]] = []
     for row in rows:
-        if demo_mode and row["session_id"].startswith("demo-"):
+        sid = row["session_id"]
+        if demo_mode and sid.startswith("demo-"):
             continue
         last = row["ultimo"]
         try:
@@ -84,14 +100,21 @@ def reconcile(con: sqlite3.Connection, *, living: dict[str, bool] | None = None,
                 last_dt = last_dt.replace(tzinfo=timezone.utc)
         except (AttributeError, ValueError):
             continue
-        status = living.get(row["session_id"])
+        status = living.get(sid)
         if status is False or (status is None and last_dt < cutoff):
-            dead.append(row["session_id"])
+            dead.append((row["session_key"], sid))
+
     count = 0
-    for sid in dead:
+    for skey, _sid in dead:
         count += con.execute(
-            "UPDATE execucao SET estado = 'orfa', origem_encerramento = 'pid_morto', atualizado_em = ? "
-            "WHERE session_id = ? AND estado IN ('trabalhando', 'delegando', 'aguardando')",
-            (now.isoformat(timespec="seconds"), sid),
+            """
+            UPDATE execucao
+            SET estado = 'orfa',
+                origem_encerramento = 'pid_morto',
+                atualizado_em = ?
+            WHERE session_key = ?
+              AND estado IN ('trabalhando', 'delegando', 'aguardando')
+            """,
+            (now.isoformat(timespec="seconds"), skey),
         ).rowcount
     return count
