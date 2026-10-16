@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Console · AI Operations Room</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/office.css">
+  <link rel="stylesheet" href="/static/agent-console.css">
+</head>
+<body>
+  <aside class="trilho trilho-principal" aria-label="Navegação principal">
+    <div class="trilho-marca" aria-hidden="true"></div>
+    <nav class="trilho-nav">
+      <a class="nav" href="/" aria-label="Escritório"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19v-5m4 5V9m4 10v-8m4 8V5"/></svg></a>
+      <a class="nav" href="/projetos" aria-label="Projetos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5a2 2 0 0 1 2-2h5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10h18"/></svg></a>
+      <a class="nav active" href="/agent-console" aria-label="Agent Console"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="m7 9 3 3-3 3m5 0h5"/></svg></a>
+      <a class="nav" href="/como-utilizar" aria-label="Como utilizar"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M9.7 9a2.45 2.45 0 1 1 4.4 1.48c-.8 1.04-2.1 1.32-2.1 2.78"/><path d="M12 16.7h.01"/></svg></a>
+    </nav>
+  </aside>
+
+  <main class="container console-page">
+    <p id="notice" class="notice" role="status" hidden></p>
+    <header class="page-head console-head">
+      <div>
+        <p class="eyebrow">TASK RUNNER</p>
+        <h1>Agent Console</h1>
+        <p class="intro">Envie uma tarefa explicitamente para um agente e acompanhe a execução sem misturar conteúdo da conversa com a telemetria global.</p>
+      </div>
+      <span id="provider-state" class="console-provider-state">Carregando providers…</span>
+    </header>
+
+    <div class="console-layout">
+      <aside class="console-sidebar panel">
+        <div class="console-sidebar-head">
+          <div>
+            <p class="eyebrow">HISTÓRICO</p>
+            <h2>Tasks</h2>
+          </div>
+          <button id="new-task" class="secondary" type="button">Nova</button>
+        </div>
+        <div id="task-list" class="console-task-list"></div>
+      </aside>
+
+      <section class="console-main">
+        <section id="composer" class="panel console-composer">
+          <div class="console-form-grid">
+            <label>Provider
+              <select id="task-source"></select>
+            </label>
+            <label>Agente
+              <select id="task-agent"></select>
+            </label>
+            <label>Projeto
+              <select id="task-project"><option value="">Sem projeto</option></select>
+            </label>
+          </div>
+          <label class="console-prompt-label">Tarefa
+            <textarea id="task-prompt" rows="6" maxlength="100000" placeholder="Descreva o resultado que você quer obter…"></textarea>
+          </label>
+          <div class="console-actions">
+            <p class="console-privacy">O prompt e a resposta pertencem somente a esta task. Hooks externos continuam metadata-only.</p>
+            <button id="send-task" class="primary" type="button">Executar tarefa</button>
+          </div>
+        </section>
+
+        <section id="task-detail" class="panel console-detail" hidden>
+          <div class="console-detail-head">
+            <div>
+              <p class="eyebrow">EXECUÇÃO</p>
+              <h2 id="task-title">Task</h2>
+            </div>
+            <div class="console-detail-actions">
+              <span id="task-status" class="console-status"></span>
+              <button id="cancel-task" class="secondary" type="button">Cancelar</button>
+            </div>
+          </div>
+
+          <div class="console-meta" id="task-meta"></div>
+
+          <div class="console-columns">
+            <section>
+              <h3>Timeline</h3>
+              <ol id="task-timeline" class="console-timeline"></ol>
+            </section>
+            <section>
+              <h3>Resposta final</h3>
+              <pre id="task-output" class="console-output">Aguardando execução…</pre>
+              <div id="task-error" class="console-error" hidden></div>
+            </section>
+          </div>
+        </section>
+      </section>
+    </div>
+  </main>
+
+  <script src="/static/agent-console.js" defer></script>
+</body>
+</html>
