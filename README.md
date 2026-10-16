@@ -1,5 +1,7 @@
 # AI Operations Room
 
+> Versão atual: **v0.7.0** — núcleo multi-provider + OpenAI Agents API + Agent Console / Task Runner.
+
 Uma sala local para observar sessões e subagentes de diferentes provedores de IA e, pela **Agent Console**, iniciar tarefas explicitamente por um runner provider-neutral.
 
 O projeto separa duas superfícies:
