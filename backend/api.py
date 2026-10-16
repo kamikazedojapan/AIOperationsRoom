@@ -18,6 +18,7 @@ from backend.events import ingest
 from backend import projects
 from backend import runs
 from backend.reconcile import reconcile
+from backend.task_api import router as task_router
 
 
 class ProjectInput(BaseModel):
@@ -37,6 +38,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="AI Operations Room", lifespan=lifespan)
+app.include_router(task_router)
 
 
 @app.get("/api/health")
