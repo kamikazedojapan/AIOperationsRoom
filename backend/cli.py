@@ -25,6 +25,7 @@ EVENTS = (
 
 CODEX_EVENTS = EVENTS
 CODEX_SESSION_START_MATCHER = "^(startup|resume|clear|fork)$"
+CODEX_STATUS_MESSAGE = "AI Operations Room telemetry"
 
 
 def settings_path() -> Path:
@@ -35,21 +36,49 @@ def codex_hooks_path() -> Path:
     return Path.home() / ".codex" / "hooks.json"
 
 
+def codex_wrapper_path() -> Path:
+    return Path.home() / ".ai-operations-room" / "codex-hook.cmd"
+
+
 def command() -> str:
     invocation = f'"{sys.executable}" "{ROOT / "hooks" / "capture.py"}"'
     return f"& {invocation}" if os.name == "nt" else invocation
 
 
-def codex_command(*, windows: bool | None = None) -> str:
-    if windows is None:
-        windows = os.name == "nt"
+def write_codex_wrapper(path: Path | None = None) -> Path:
+    """Write the Windows shim used by Codex command hooks.
+
+    Current Codex Windows hook parsing is more reliable when the hook command
+    itself contains no quoted executable path. The shim keeps the configured
+    hook simple while still safely quoting Python and the capture script.
+    """
+    target = path or codex_wrapper_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
     python = os.path.abspath(sys.executable)
     script = str(ROOT / "hooks" / "codex_capture.py")
+    content = (
+        "@echo off\r\n"
+        f'"{python}" "{script}"\r\n'
+        "exit /b %ERRORLEVEL%\r\n"
+    )
+    target.write_bytes(content.encode("utf-8"))
+    return target
+
+
+def codex_command(
+    *,
+    windows: bool | None = None,
+    wrapper_path: Path | None = None,
+) -> str:
+    if windows is None:
+        windows = os.name == "nt"
+
     if windows:
-        # Codex command hooks on Windows can fail before Python starts when the
-        # executable itself is the first quoted token. Let cmd.exe own the
-        # quoting so paths with spaces remain safe.
-        return f'cmd.exe /d /s /c ""{python}" "{script}""'
+        wrapper = wrapper_path or codex_wrapper_path()
+        return f"cmd.exe /d /s /c {wrapper}"
+
+    python = os.path.abspath(sys.executable)
+    script = str(ROOT / "hooks" / "codex_capture.py")
     return f'"{python}" "{script}"'
 
 
@@ -69,6 +98,9 @@ def _our_hook(item: dict) -> bool:
 
 
 def _our_codex_hook(item: dict) -> bool:
+    if item.get("statusMessage") == CODEX_STATUS_MESSAGE:
+        return True
+
     script = ROOT / "hooks" / "codex_capture.py"
     return any(
         _command_targets(item.get(field), script)
@@ -144,15 +176,20 @@ def remove_hooks(path: Path) -> None:
     print(f"Hooks removidos de {path}")
 
 
-def _configure_codex_hook(item: dict, event: str) -> None:
-    invocation = codex_command()
+def _configure_codex_hook(
+    item: dict,
+    event: str,
+    *,
+    invocation: str | None = None,
+) -> None:
+    invocation = invocation or codex_command()
     item.update(
         {
             "type": "command",
             "command": invocation,
             "commandWindows": invocation,
             "timeout": 3 if event == "SessionEnd" else 5,
-            "statusMessage": "AI Operations Room telemetry",
+            "statusMessage": CODEX_STATUS_MESSAGE,
         }
     )
 
@@ -162,6 +199,10 @@ def install_codex_hooks(path: Path) -> None:
     hooks = settings.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         raise ValueError("A chave `hooks` do Codex precisa ser um objeto JSON.")
+
+    if os.name == "nt":
+        write_codex_wrapper()
+    invocation = codex_command()
 
     for event in CODEX_EVENTS:
         groups = hooks.setdefault(event, [])
@@ -177,14 +218,14 @@ def install_codex_hooks(path: Path) -> None:
                 continue
             for item in items:
                 if isinstance(item, dict) and _our_codex_hook(item):
-                    _configure_codex_hook(item, event)
+                    _configure_codex_hook(item, event, invocation=invocation)
                     if event == "SessionStart":
                         group["matcher"] = CODEX_SESSION_START_MATCHER
                     found = True
 
         if not found:
             hook: dict = {}
-            _configure_codex_hook(hook, event)
+            _configure_codex_hook(hook, event, invocation=invocation)
             group = {"hooks": [hook]}
             if event == "SessionStart":
                 group["matcher"] = CODEX_SESSION_START_MATCHER
@@ -194,6 +235,8 @@ def install_codex_hooks(path: Path) -> None:
     # config as plain UTF-8 even if a previous editor introduced a BOM.
     save_settings(path, settings, preserve_bom=False)
     print(f"Hooks do Codex registrados em {path}")
+    if os.name == "nt":
+        print(f"Wrapper do Codex registrado em {codex_wrapper_path()}")
     print("Abra `/hooks` no Codex e revise/confie nas novas definições antes de usá-las.")
 
 
@@ -231,6 +274,12 @@ def remove_codex_hooks(path: Path) -> None:
     if not hooks:
         settings.pop("hooks", None)
     save_settings(path, settings, preserve_bom=False)
+
+    if os.name == "nt":
+        wrapper = codex_wrapper_path()
+        if wrapper.exists():
+            wrapper.unlink()
+
     print(f"Hooks do Codex removidos de {path}")
 
 
