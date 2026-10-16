@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from backend import cli
 from backend.cli import install_codex_hooks, remove_codex_hooks
 
 
@@ -25,10 +26,15 @@ def test_codex_hook_registration_preserves_existing_hooks(tmp_path):
                 },
             }
         ),
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
 
     install_codex_hooks(settings)
+
+    # Codex rejects a UTF-8 BOM in hooks.json, even if the previous editor
+    # happened to write one.
+    assert not settings.read_bytes().startswith(b"\xef\xbb\xbf")
+
     registered = json.loads(settings.read_text(encoding="utf-8"))
 
     assert registered["description"] == "keep me"
@@ -62,3 +68,16 @@ def test_codex_hook_registration_preserves_existing_hooks(tmp_path):
             ]
         },
     }
+
+
+def test_codex_windows_command_uses_cmd_wrapper(monkeypatch):
+    monkeypatch.setattr(cli.os, "name", "nt")
+
+    command = cli.codex_command()
+
+    assert command.startswith('cmd.exe /d /s /c ""')
+    assert "codex_capture.py" in command
+    assert cli._command_targets(
+        command,
+        cli.ROOT / "hooks" / "codex_capture.py",
+    )
