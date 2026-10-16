@@ -1,0 +1,43 @@
+.console-page { max-width: 1440px; }
+.console-head { align-items: flex-start; }
+.console-provider-state { color: #a8a1b7; font-size: 12px; border: 1px solid #3a3149; border-radius: 999px; padding: 8px 12px; }
+.console-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 20px; }
+.console-sidebar { margin-top: 0; min-height: 680px; }
+.console-sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.console-task-list { display: grid; gap: 8px; }
+.console-task-card { width: 100%; border: 1px solid #342d43; background: #120f19; color: #f6f3fb; border-radius: 12px; padding: 12px; text-align: left; display: grid; gap: 8px; }
+.console-task-card:hover, .console-task-card.selected { border-color: #9668f5; background: #20182c; }
+.console-task-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.console-task-preview { color: #c7c0d0; font-size: 12px; line-height: 1.45; }
+.console-task-card small { color: #81798f; font-size: 10px; }
+.console-main { min-width: 0; display: grid; gap: 20px; align-content: start; }
+.console-composer, .console-detail { margin-top: 0; }
+.console-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.console-composer label { display: grid; gap: 8px; font-size: 12px; color: #b8afc5; font-weight: 650; }
+.console-composer select, .console-composer textarea { width: 100%; color: #f6f3fb; background: #0f0c16; border: 1px solid #453b55; border-radius: 10px; padding: 11px 12px; font: inherit; }
+.console-composer select:focus, .console-composer textarea:focus { outline: 2px solid #8b5bf2; outline-offset: 1px; }
+.console-prompt-label { margin-top: 16px; }
+.console-composer textarea { resize: vertical; min-height: 145px; line-height: 1.5; }
+.console-actions { margin-top: 14px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.console-privacy { margin: 0; color: #8f879c; font-size: 11px; max-width: 680px; }
+.console-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.console-detail-actions { display: flex; align-items: center; gap: 10px; }
+.console-status { display: inline-flex; align-items: center; border: 1px solid #4c415e; border-radius: 999px; padding: 4px 8px; color: #cfc5db; font-size: 10px; white-space: nowrap; }
+.status-running { color: #92e2b4; border-color: #2e6d49; }
+.status-waiting, .status-queued { color: #f0c783; border-color: #765a2e; }
+.status-completed { color: #b6a1ff; border-color: #5a488f; }
+.status-failed { color: #ff9ca9; border-color: #793847; }
+.status-cancelled { color: #a5a0ad; border-color: #48434f; }
+.console-meta { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 16px 0 4px; color: #9f97ac; font-size: 11px; }
+.console-meta b { color: #d9d2e2; }
+.console-columns { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 24px; }
+.console-timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.console-timeline li { position: relative; border-left: 2px solid #493864; background: #110e17; border-radius: 0 10px 10px 0; padding: 10px 12px; display: grid; gap: 5px; }
+.console-timeline li > div { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.console-timeline strong { font-size: 12px; }
+.console-timeline small, .console-timeline time { color: #857e91; font-size: 10px; }
+.console-timeline p { margin: 0; color: #bbb3c6; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.console-output { margin: 0; min-height: 220px; max-height: 520px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #0d0a13; color: #e9e4ef; border: 1px solid #332a41; border-radius: 12px; padding: 16px; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.console-error { margin-top: 10px; padding: 12px; border: 1px solid #743747; background: #301923; color: #ffadb8; border-radius: 10px; white-space: pre-wrap; }
+@media (max-width: 980px) { .console-layout { grid-template-columns: 1fr; } .console-sidebar { min-height: 0; } .console-task-list { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } }
+@media (max-width: 760px) { .console-form-grid, .console-columns { grid-template-columns: 1fr; } .console-actions, .console-detail-head { align-items: flex-start; flex-direction: column; } }
