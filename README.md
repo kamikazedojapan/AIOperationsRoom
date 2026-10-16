@@ -1,6 +1,6 @@
 # AI Operations Room
 
-> Versão atual: **v0.7.0** — núcleo multi-provider + OpenAI Agents API + Agent Console / Task Runner.
+> Versão atual: **v0.7.1** — núcleo multi-provider + OpenAI Agents API + Agent Console / Task Runner + hotfix dos hooks Codex no Windows.
 
 Uma sala local para observar sessões e subagentes de diferentes provedores de IA e, pela **Agent Console**, iniciar tarefas explicitamente por um runner provider-neutral.
 
@@ -55,7 +55,9 @@ uv run python -m backend.cli codex-hooks-install
 uv run python -m backend.cli codex-hooks-remove
 ```
 
-Depois da instalação, abra `/hooks` no Codex e revise/confie nas definições registradas. Consulte [`docs/CODEX_INTEGRATION.md`](docs/CODEX_INTEGRATION.md) para o mapeamento e as limitações atuais.
+Depois da instalação, abra `/hooks` no Codex e revise/confie nas definições registradas. No Windows, o instalador cria automaticamente um pequeno wrapper `.cmd` em `~/.ai-operations-room` para evitar falhas do parser de hooks com caminhos entre aspas e espaços. O fluxo real foi validado com Codex CLI e sessão `codex` aparecendo no Operations Room.
+
+Consulte [`docs/CODEX_INTEGRATION.md`](docs/CODEX_INTEGRATION.md) para o mapeamento e as limitações atuais.
 
 ## OpenAI Agents API
 
