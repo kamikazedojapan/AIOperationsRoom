@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from backend.api import app
 from backend.config import events_path
 from backend.projects import path_key, resolve
+from backend.events_contract import EventName, EventSource
 
 
 @pytest.fixture
@@ -29,9 +30,21 @@ def project(client: TestClient, name: str, path: str) -> dict:
 
 def event_file(*items: dict) -> None:
     path = events_path()
+
     with path.open("a", encoding="utf-8") as stream:
         for item in items:
-            stream.write(json.dumps(item) + "\n")
+            item.setdefault(
+                "source",
+                EventSource.CLAUDE_CODE,
+            )
+
+            stream.write(
+                json.dumps(
+                    item,
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
 
 def test_project_contract_and_crud(client: TestClient):
@@ -64,7 +77,7 @@ def test_specific_path_wins_and_sibling_does_not_match():
 
 def test_unmapped_session_moves_immediately_when_mapped_and_returns_after_delete(client: TestClient):
     event_file({"session_id": "s1", "cwd": "C:/work/atlas/src",
-                "evento": "SessionStart", "t": "2026-10-07T12:00:00+00:00"})
+                "evento": "EventName.SESSION_STARTED", "t": "2026-10-07T12:00:00+00:00"})
     first = client.get("/api/sessoes").json()["sessoes"]
     assert first[0]["projeto_id"] is None
     created = project(client, "Atlas CRM", "C:/work/atlas")
@@ -80,9 +93,9 @@ def test_mapping_existing_project_replaces_its_path(client: TestClient):
     created = project(client, "Orion Flow", "/work/orion")
     event_file(
         {"session_id": "old", "cwd": "/work/orion/src",
-         "evento": "SessionStart", "t": "2026-10-07T12:00:00+00:00"},
+         "evento": "EventName.SESSION_STARTED", "t": "2026-10-07T12:00:00+00:00"},
         {"session_id": "new", "cwd": "/work/orion-v2/src",
-         "evento": "SessionStart", "t": "2026-10-07T12:01:00+00:00"},
+         "evento": "EventName.SESSION_STARTED", "t": "2026-10-07T12:01:00+00:00"},
     )
     before = {s["session_id"]: s for s in client.get("/api/sessoes").json()["sessoes"]}
     assert before["old"]["projeto_id"] == created["id"]
@@ -101,7 +114,7 @@ def test_archived_project_still_matches_and_duplicate_path_is_rejected(client: T
                        json={"nome": "Other", "caminho_local": "/home/demo/aurora"}).status_code == 409
     client.post(f"/api/projetos/{created['id']}/arquivar")
     event_file({"session_id": "s2", "cwd": "/home/demo/aurora/src",
-                "evento": "SessionStart", "t": "2026-10-07T12:00:00+00:00"})
+                "evento": "EventName.SESSION_STARTED", "t": "2026-10-07T12:00:00+00:00"})
     assert client.get("/api/sessoes").json()["sessoes"][0]["projeto_id"] == created["id"]
 
 

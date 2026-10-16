@@ -1,4 +1,4 @@
-"""Projection of normalized events into session and agent states."""
+"""Projection of normalized events into provider-aware run states."""
 
 from __future__ import annotations
 
@@ -6,6 +6,11 @@ import json
 import sqlite3
 
 from backend.events_contract import EventName
+from backend.identity import (
+    agent_execution_key,
+    main_execution_key,
+    session_key,
+)
 
 
 ACTIVE = {
@@ -16,22 +21,49 @@ ACTIVE = {
 
 
 def key_for(event: dict) -> str:
+    source = event["source"]
+    session_id = event["session_id"]
+
     agent_id = event.get("agent_id")
 
     if isinstance(agent_id, str) and agent_id:
-        return f"agent:{agent_id}"
+        return agent_execution_key(
+            source,
+            session_id,
+            agent_id,
+        )
 
-    return f"session:{event['session_id']}"
+    return main_execution_key(
+        source,
+        session_id,
+    )
 
 
-def main_key(session_id: str) -> str:
-    return f"session:{session_id}"
+def main_key(event: dict) -> str:
+    return main_execution_key(
+        event["source"],
+        event["session_id"],
+    )
 
 
-def _value(event: dict, name: str) -> str:
+def _session_key(event: dict) -> str:
+    return session_key(
+        event["source"],
+        event["session_id"],
+    )
+
+
+def _value(
+    event: dict,
+    name: str,
+) -> str:
     value = event.get(name)
 
-    return value if isinstance(value, str) else ""
+    return (
+        value
+        if isinstance(value, str)
+        else ""
+    )
 
 
 def _upsert(
@@ -43,12 +75,15 @@ def _upsert(
     ended_by: str | None = None,
 ) -> None:
     key = key_for(event)
+    skey = _session_key(event)
     when = _value(event, "t")
 
     existing = con.execute(
-        "SELECT atualizado_em "
-        "FROM execucao "
-        "WHERE chave = ?",
+        """
+        SELECT atualizado_em
+        FROM execucao
+        WHERE chave = ?
+        """,
         (key,),
     ).fetchone()
 
@@ -58,34 +93,61 @@ def _upsert(
     ):
         return
 
+    agent_id = _value(
+        event,
+        "agent_id",
+    )
+
     kind = (
         _value(event, "agent_type")
         or (
-            "principal"
-            if key.startswith("session:")
-            else "subagente"
+            "subagente"
+            if agent_id
+            else "principal"
         )
     )
 
     con.execute(
-        "INSERT INTO execucao "
-        "(chave, session_id, agent_id, pai_chave, "
-        "tipo, cwd, estado, origem_encerramento, "
-        "criado_em, atualizado_em) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(chave) DO UPDATE SET "
-        "cwd = CASE "
-        "WHEN excluded.cwd <> '' "
-        "THEN excluded.cwd "
-        "ELSE execucao.cwd END, "
-        "estado = excluded.estado, "
-        "origem_encerramento = "
-        "excluded.origem_encerramento, "
-        "atualizado_em = excluded.atualizado_em",
+        """
+        INSERT INTO execucao (
+            chave,
+            session_key,
+            source,
+            session_id,
+            agent_id,
+            pai_chave,
+            tipo,
+            cwd,
+            estado,
+            origem_encerramento,
+            criado_em,
+            atualizado_em
+        )
+        VALUES (
+            ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?
+        )
+
+        ON CONFLICT(chave)
+        DO UPDATE SET
+            cwd = CASE
+                WHEN excluded.cwd <> ''
+                THEN excluded.cwd
+                ELSE execucao.cwd
+            END,
+
+            estado = excluded.estado,
+            origem_encerramento =
+                excluded.origem_encerramento,
+            atualizado_em =
+                excluded.atualizado_em
+        """,
         (
             key,
+            skey,
+            event["source"],
             event["session_id"],
-            _value(event, "agent_id") or None,
+            agent_id or None,
             parent,
             kind,
             _value(event, "cwd"),
@@ -118,16 +180,23 @@ def _set_main(
 
 def _active_children(
     con: sqlite3.Connection,
-    session_id: str,
+    event: dict,
 ) -> int:
     return con.execute(
-        "SELECT COUNT(*) "
-        "FROM execucao "
-        "WHERE session_id = ? "
-        "AND pai_chave IS NOT NULL "
-        "AND estado IN "
-        "('trabalhando', 'delegando', 'aguardando')",
-        (session_id,),
+        """
+        SELECT COUNT(*)
+        FROM execucao
+        WHERE session_key = ?
+          AND pai_chave IS NOT NULL
+          AND estado IN (
+              'trabalhando',
+              'delegando',
+              'aguardando'
+          )
+        """,
+        (
+            _session_key(event),
+        ),
     ).fetchone()[0]
 
 
@@ -162,20 +231,18 @@ def apply(
             con,
             event,
             state="trabalhando",
-            parent=main_key(
-                event["session_id"]
-            ),
+            parent=main_key(event),
         )
 
     elif name == EventName.AGENT_FINISHED:
         main_execution = con.execute(
-            "SELECT 1 "
-            "FROM execucao "
-            "WHERE chave = ?",
+            """
+            SELECT 1
+            FROM execucao
+            WHERE chave = ?
+            """,
             (
-                main_key(
-                    event["session_id"]
-                ),
+                main_key(event),
             ),
         ).fetchone()
 
@@ -190,20 +257,18 @@ def apply(
             con,
             event,
             state="concluida",
-            parent=main_key(
-                event["session_id"]
-            ),
+            parent=main_key(event),
             ended_by=EventName.AGENT_FINISHED,
         )
 
         main = con.execute(
-            "SELECT estado "
-            "FROM execucao "
-            "WHERE chave = ?",
+            """
+            SELECT estado
+            FROM execucao
+            WHERE chave = ?
+            """,
             (
-                main_key(
-                    event["session_id"]
-                ),
+                main_key(event),
             ),
         ).fetchone()
 
@@ -212,7 +277,7 @@ def apply(
             and main["estado"] == "delegando"
             and not _active_children(
                 con,
-                event["session_id"],
+                event,
             )
         ):
             _set_main(
@@ -237,29 +302,40 @@ def apply(
             }
 
             children = con.execute(
-                "SELECT chave, agent_id "
-                "FROM execucao "
-                "WHERE session_id = ? "
-                "AND pai_chave IS NOT NULL "
-                "AND estado IN "
-                "('trabalhando', "
-                "'delegando', "
-                "'aguardando')",
+                """
+                SELECT
+                    chave,
+                    agent_id
+                FROM execucao
+                WHERE session_key = ?
+                  AND pai_chave IS NOT NULL
+                  AND estado IN (
+                      'trabalhando',
+                      'delegando',
+                      'aguardando'
+                  )
+                """,
                 (
-                    event["session_id"],
+                    _session_key(event),
                 ),
             ).fetchall()
 
             for child in children:
-                if child["agent_id"] not in listed:
+                if (
+                    child["agent_id"]
+                    not in listed
+                ):
                     con.execute(
-                        "UPDATE execucao "
-                        "SET estado = 'concluida', "
-                        "origem_encerramento = "
-                        "'interrompida', "
-                        "atualizado_em = ? "
-                        "WHERE chave = ? "
-                        "AND atualizado_em <= ?",
+                        """
+                        UPDATE execucao
+                        SET
+                            estado = 'concluida',
+                            origem_encerramento =
+                                'interrompida',
+                            atualizado_em = ?
+                        WHERE chave = ?
+                          AND atualizado_em <= ?
+                        """,
                         (
                             _value(
                                 event,
@@ -280,7 +356,7 @@ def apply(
                 "delegando"
                 if _active_children(
                     con,
-                    event["session_id"],
+                    event,
                 )
                 else "aguardando"
             ),
@@ -301,24 +377,28 @@ def apply(
         )
 
         con.execute(
-            "UPDATE execucao "
-            "SET estado = 'concluida', "
-            "origem_encerramento = ?, "
-            "atualizado_em = ? "
-            "WHERE session_id = ? "
-            "AND pai_chave IS NOT NULL "
-            "AND estado IN "
-            "('trabalhando', "
-            "'delegando', "
-            "'aguardando') "
-            "AND atualizado_em <= ?",
+            """
+            UPDATE execucao
+            SET
+                estado = 'concluida',
+                origem_encerramento = ?,
+                atualizado_em = ?
+            WHERE session_key = ?
+              AND pai_chave IS NOT NULL
+              AND estado IN (
+                  'trabalhando',
+                  'delegando',
+                  'aguardando'
+              )
+              AND atualizado_em <= ?
+            """,
             (
                 EventName.SESSION_FINISHED,
                 _value(
                     event,
                     "t",
                 ),
-                event["session_id"],
+                _session_key(event),
                 _value(
                     event,
                     "t",

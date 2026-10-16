@@ -92,8 +92,8 @@ def test_projection_tracks_agents_and_session_end(
         }
 
         assert states == {
-            "session:one": "concluida",
-            "agent:a": "concluida",
+            "claude_code:one:main": "concluida",
+            "claude_code:one:agent:a": "concluida",
         }
 
         assert (
@@ -275,17 +275,17 @@ def test_stop_interrupts_missing_child_and_does_not_delegate_shell(
         }
 
         assert (
-            agents["agent:a"]["estado"]
+            agents["claude_code:s:agent:a"]["estado"]
             == "concluida"
         )
 
         assert (
-            agents["agent:a"]["origem_encerramento"]
+            agents["claude_code:s:agent:a"]["origem_encerramento"]
             == "interrompida"
         )
 
         assert (
-            agents["session:s"]["estado"]
+            agents["claude_code:s:main"]["estado"]
             == "aguardando"
         )
 
@@ -326,12 +326,12 @@ def test_child_stop_returns_main_to_work_and_missing_list_keeps_child(
         }
 
         assert (
-            agents["agent:a"]["estado"]
+            agents["claude_code:s:agent:a"]["estado"]
             == "trabalhando"
         )
 
         assert (
-            agents["session:s"]["estado"]
+            agents["claude_code:s:main"]["estado"]
             == "delegando"
         )
 
@@ -354,12 +354,12 @@ def test_child_stop_returns_main_to_work_and_missing_list_keeps_child(
         }
 
         assert (
-            agents["agent:a"]["estado"]
+            agents["claude_code:s:agent:a"]["estado"]
             == "concluida"
         )
 
         assert (
-            agents["session:s"]["estado"]
+            agents["claude_code:s:main"]["estado"]
             == "trabalhando"
         )
 
