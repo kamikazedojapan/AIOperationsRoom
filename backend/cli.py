@@ -40,10 +40,12 @@ def command() -> str:
     return f"& {invocation}" if os.name == "nt" else invocation
 
 
-def codex_command() -> str:
-    python = str(Path(sys.executable).resolve())
+def codex_command(*, windows: bool | None = None) -> str:
+    if windows is None:
+        windows = os.name == "nt"
+    python = os.path.abspath(sys.executable)
     script = str(ROOT / "hooks" / "codex_capture.py")
-    if os.name == "nt":
+    if windows:
         # Codex command hooks on Windows can fail before Python starts when the
         # executable itself is the first quoted token. Let cmd.exe own the
         # quoting so paths with spaces remain safe.
