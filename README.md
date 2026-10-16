@@ -1,96 +1,149 @@
 # AI Operations Room
 
-Uma sala local para acompanhar sessões e subagentes do Claude Code. O aplicativo recebe somente metadados de hooks, mantém os dados em SQLite local e serve a interface em `127.0.0.1`.
+Uma sala local para observar sessões e subagentes de diferentes provedores de IA e, pela **Agent Console**, iniciar tarefas explicitamente por um runner provider-neutral.
+
+O projeto separa duas superfícies:
+
+- **Observabilidade global:** eventos operacionais normalizados de Claude Code, Codex e integrações suportadas. Hooks não armazenam prompts, respostas ou transcrições.
+- **Agent Console:** conteúdo digitado diretamente pelo usuário pertence à própria task e pode ser persistido localmente junto da resposta final e da timeline.
+
+Os dados locais ficam em SQLite e a interface é servida em `127.0.0.1`.
 
 ## Requisitos
 
 - Python 3.12 ou superior
-- [`uv` instalado](https://docs.astral.sh/uv/getting-started/installation/) e disponível no terminal
-- Claude Code, somente para acompanhar sessões reais
+- [`uv`](https://docs.astral.sh/uv/getting-started/installation/) disponível no terminal
+- opcionalmente Claude Code e/ou Codex para observabilidade real dessas superfícies
+- `OPENAI_API_KEY` para executar tasks pela integração OpenAI Agents API
 
 ## Início rápido
 
 ```powershell
 uv sync --extra dev
-uv run python -m backend.cli hooks-install
 uv run python -m backend.cli serve
 ```
 
-Execute os comandos na pasta deste repositório. Abra [http://127.0.0.1:8765](http://127.0.0.1:8765) e **deixe o terminal do servidor aberto** enquanto usa a sala; `Ctrl+C` encerra o servidor. O hook continua instalado depois que o servidor para e registra eventos para a próxima abertura. A tela Projetos associa um diretório local a cada nome exibido na sala. O caminho mais específico vence. Uma sala aparece quando há uma sessão capturada nesse diretório; cadastrar um projeto sozinho não cria uma sala vazia.
+Abra:
 
-Mantenha a pasta do repositório no mesmo lugar após instalar os hooks: o comando registrado no Claude Code aponta para o caminho local deste checkout. Se precisar movê-la, execute `hooks-remove` antes da mudança e `hooks-install` na nova localização.
+- Escritório: `http://127.0.0.1:8765/`
+- Projetos: `http://127.0.0.1:8765/projetos`
+- Agent Console: `http://127.0.0.1:8765/agent-console`
 
-### Abrir automaticamente ao entrar no Windows
+A tela **Projetos** associa diretórios locais aos nomes mostrados no Escritório. O caminho mais específico vence.
 
-Depois de executar `uv sync --extra dev` e `hooks-install` uma vez, você pode iniciar o servidor em segundo plano e abrir o navegador com:
+## Claude Code
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-room.ps1
-```
-
-O script usa a porta 8765, espera a API responder e abre a sala. Se a porta já estiver ocupada, ele encerra com erro em vez de abrir outra aplicação. Para usar outra porta, acrescente `-Port 8898` ao comando. Se o atalho não abrir a sala, execute o comando manualmente em um terminal para ver o erro; erros de um atalho oculto não aparecem na tela.
-
-Para executar esse script em cada **login** do Windows:
-
-1. Pressione `Win+R`, digite `shell:startup` e pressione Enter.
-2. Na pasta aberta, crie um atalho. Como destino, use `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\caminho\para\AiOperationsRoom\scripts\start-room.ps1"`, trocando o caminho pelo local real do repositório.
-3. Faça logout e login para testar. Para desativar a abertura automática, remova esse atalho da pasta Inicializar.
-
-O script inicia apenas o servidor real. A demonstração abaixo usa dados separados e deve ser aberta com `demo --serve`. [A Microsoft documenta a pasta `shell:startup` para aplicativos iniciados no login](https://support.microsoft.com/en-gb/windows/experience/startup-boot/configure-startup-applications-in-windows).
-
-## Demonstração
-
-O modo demo cria uma fila e um banco separados em `~/.ai-operations-room-demo`, sem acessar dados reais ou precisar do Claude Code. Projetos cadastrados na demo não aparecem no servidor real, e vice-versa.
-
-```powershell
-uv run python -m backend.cli demo --serve
-```
-
-Abra `http://127.0.0.1:8765` e interrompa o processo quando terminar. Para apenas gerar os dados fictícios, omita `--serve`. Ao executar `demo` novamente, os eventos e horários fictícios são renovados; sessões da demo não são classificadas como órfãs por falta de PID.
-
-Use `--port 8876` em qualquer comando de servidor quando a porta padrão já estiver ocupada.
-
-## Hooks do Claude Code
-
-O registro altera `~/.claude/settings.json`: adiciona um command hook para `SessionStart`, `UserPromptSubmit`, `Stop`, `SubagentStart`, `SubagentStop` e `SessionEnd`. Antes de alterar o arquivo, revise seu conteúdo.
+Para registrar/remover os hooks do Claude Code:
 
 ```powershell
 uv run python -m backend.cli hooks-install
 uv run python -m backend.cli hooks-remove
 ```
 
-`hooks-remove` remove somente entradas cujo comando aponta para `hooks/capture.py` deste checkout, mesmo se o executável Python tiver mudado. Ele preserva os demais hooks e configurações.
+Os hooks nativos são traduzidos pelo `ClaudeAdapter` para o contrato provider-neutral antes da persistência.
 
-No Windows, `hooks-install` registra PowerShell explicitamente e também corrige um hook antigo deste checkout que tenha sido criado sem o campo `shell`.
+O hook registra somente metadados operacionais como IDs, tipo de agente, diretório, razão de encerramento e horário. Ele não salva prompt nem resposta.
 
-O hook registra identificadores, tipo de agente, diretório de trabalho, razão de encerramento e a hora do evento. Ele não salva prompts, respostas nem transcrições. Para detectar sessões interrompidas sem hook de encerramento, o servidor consulta o identificador da sessão e o PID em `~/.claude/sessions`; não copia o conteúdo desses arquivos para o banco. Os dados ficam por padrão em `~/.ai-operations-room`; defina `AI_OPERATIONS_ROOM_DATA_DIR` para usar outra pasta.
+## Codex
 
-O Painel usa um período selecionável de 6, 12 ou 24 horas. O Escritório mostra execuções ativas e as encerradas nas últimas 12 horas; apenas sessões principais sem subagentes encerradas em menos de 30 segundos são ocultadas da sala.
+O AI Operations Room também possui integração baseada nos lifecycle hooks oficiais do Codex.
 
-## Sugestões de agentes
+```powershell
+uv run python -m backend.cli codex-hooks-install
+uv run python -m backend.cli codex-hooks-remove
+```
 
-Estou compartilhando também 2 agentes que eu utilizo nos meus projetos de trabalho e pessoais[SUGESTAO_DE_AGENTES.md](SUGESTAO_DE_AGENTES.md): um revisor de código e um pesquisador de contexto.
+Depois da instalação, abra `/hooks` no Codex e revise/confie nas definições registradas. Consulte [`docs/CODEX_INTEGRATION.md`](docs/CODEX_INTEGRATION.md) para o mapeamento e as limitações atuais.
+
+## OpenAI Agents API
+
+A primeira integração OpenAI escolhida é a **Agents API**, porque ela expõe sessões duráveis, turnos, eventos de streaming e subagentes observáveis sem depender de eventos internos do ChatGPT comum.
+
+Configure a chave no ambiente antes de iniciar o servidor:
+
+```powershell
+$env:OPENAI_API_KEY="sua-chave"
+uv run python -m backend.cli serve
+```
+
+A Agent Console utiliza por padrão um sandbox `openai_hosted` e o modelo configurado por `AI_OPERATIONS_ROOM_OPENAI_MODEL` (padrão atual: `gpt-6-astra`).
+
+O projeto selecionado na Agent Console é apenas metadado local nesta versão. A pasta do seu projeto **não é enviada automaticamente** ao sandbox remoto.
+
+Consulte [`docs/OPENAI_INTEGRATION.md`](docs/OPENAI_INTEGRATION.md) e [`docs/AGENT_CONSOLE.md`](docs/AGENT_CONSOLE.md).
+
+## Agent Console / Task Runner
+
+A Agent Console permite:
+
+- escolher provider, agente e projeto;
+- criar uma task provider-neutral;
+- acompanhar `queued`, `running`, `waiting`, `completed`, `failed` ou `cancelled`;
+- acompanhar uma timeline incremental de eventos;
+- solicitar cancelamento;
+- ver a resposta final;
+- consultar histórico local de tasks.
+
+A primeira versão usa polling de aproximadamente 1 segundo. O contrato de eventos da task é cursor-based, então SSE/WebSocket pode substituir o transporte posteriormente sem mudar a semântica do runner.
+
+## Persistência e identidade
+
+Sessões externas são namespaced por `source`, por exemplo:
+
+```text
+claude_code:abc123
+codex:abc123
+openai_api:abc123
+```
+
+Isso evita colisões entre provedores. O SQLite mantém separadamente sessões/eventos/execuções globais e as tabelas `task`/`task_event` da Agent Console.
+
+Por padrão os dados ficam em `~/.ai-operations-room`. Use `AI_OPERATIONS_ROOM_DATA_DIR` para apontar outra pasta.
+
+## Demonstração
+
+O modo demo usa uma fila e um banco separados em `~/.ai-operations-room-demo`:
+
+```powershell
+uv run python -m backend.cli demo --serve
+```
+
+Ele não depende de uma sessão real de Claude/Codex/OpenAI.
+
+## Abrir automaticamente ao entrar no Windows
+
+Depois de preparar o ambiente, você pode iniciar o servidor em segundo plano com:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-room.ps1
+```
+
+O script usa a porta 8765 por padrão. Para outra porta, acrescente `-Port 8898`.
 
 ## Desenvolvimento
 
 ```powershell
 .venv\Scripts\python.exe -m pytest -q --basetemp=.test-temp
 node --check frontend/app.js
+node --check frontend/agent-console.js
 node --test tests/js/pixel.test.js
 ```
 
-Consulte [ARCHITECTURE.md](ARCHITECTURE.md), [DEVELOPMENT.md](DEVELOPMENT.md) e [HANDOFF.md](HANDOFF.md) para decisões e pontos de extensão.
+A CI do GitHub executa a suíte Python, valida a sintaxe JavaScript e roda os testes do frontend.
+
+Consulte também [`ARCHITECTURE.md`](ARCHITECTURE.md), [`DEVELOPMENT.md`](DEVELOPMENT.md), [`HANDOFF.md`](HANDOFF.md) e os documentos em [`docs/`](docs/).
 
 ## Limites atuais
 
-- A interface consulta a API a cada quatro segundos.
-- Esta versão é destinada somente ao Windows. macOS e Linux não foram validados; no macOS, a detecção de sessões órfãs ainda não funciona. Em 08/10/2026, uma sessão real do Claude Code com subagente Explore foi capturada no Windows, e a API exibiu a filha concluída e o principal trabalhando novamente.
-- O suporte de hooks foi validado com o formato documentado do Claude Code. O registro assistido usa o arquivo global de configurações do usuário; configurações gerenciadas pela organização podem impedir hooks locais.
-- O serviço é local e não fornece autenticação ou acesso remoto.
+- validações ponta a ponta reais dependem de acesso/autenticação de cada provedor;
+- a Agent Console executa primeiro via OpenAI Agents API; Claude/Codex ainda são fontes de observabilidade, não `TaskProvider`s do console;
+- seleção de projeto na Agent Console não transfere arquivos locais ao provider;
+- o serviço é local e não fornece autenticação nem acesso remoto;
+- macOS e Linux ainda não possuem o mesmo nível de validação do fluxo Windows.
 
 ## Inspiração visual
 
-A sala pixel foi inspirada pelo [Pixel Agents](https://github.com/pixel-agents-hq/pixel-agents), da equipe Pixel Agents. Os personagens e móveis foram criados para este projeto; nenhum asset do Pixel Agents é usado.
+A sala pixel foi inspirada pelo [Pixel Agents](https://github.com/pixel-agents-hq/pixel-agents). Os personagens e móveis deste projeto são próprios.
 
 ## Licença
 
