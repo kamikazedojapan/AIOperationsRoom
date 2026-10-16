@@ -34,17 +34,25 @@ Codex exposes prompt text to `UserPromptSubmit` and assistant text to stop hooks
 ## Install
 
 ```powershell
-python -m backend.cli codex-hooks-install
+uv run python -m backend.cli codex-hooks-install
 ```
 
-The installer merges its command hooks into `~/.codex/hooks.json` and preserves unrelated user hooks. After installation, start Codex and use `/hooks` to review and trust the new definitions.
+The installer merges its command hooks into `~/.codex/hooks.json` and preserves unrelated user hooks. It also rewrites the file as UTF-8 without a BOM because current Codex Windows builds reject a BOM in `hooks.json`.
+
+On Windows, the installer writes a small shim at `~/.ai-operations-room/codex-hook.cmd`. Codex invokes the shim through an unquoted `cmd.exe /d /s /c ...` command, while the shim itself safely quotes the Python executable and `hooks/codex_capture.py`. This avoids the current Windows hook-parser failure seen when the hook command directly contains quoted executable paths with spaces.
+
+After installation, start Codex and use `/hooks` to review and trust the new definitions.
 
 Remove only the Operations Room hooks with:
 
 ```powershell
-python -m backend.cli codex-hooks-remove
+uv run python -m backend.cli codex-hooks-remove
 ```
 
-## Known boundary
+The remove command also deletes the Windows shim created by the installer.
 
-Automated tests validate normalization, privacy filtering, hook-file merging, persistence, and provider isolation. A real end-to-end Codex session still requires a local Codex client with the hook definitions reviewed/trusted by the user.
+## Functional validation
+
+A real Codex CLI session was validated on Windows with trusted hooks: `SessionStart`, `UserPromptSubmit`, and stop lifecycle callbacks reached the Operations Room without `Hook failed`, and the session appeared under provider `codex` in the dashboard.
+
+Automated tests continue to cover normalization, privacy filtering, hook-file merging, provider isolation, UTF-8/BOM behavior, and the Windows shim command.
