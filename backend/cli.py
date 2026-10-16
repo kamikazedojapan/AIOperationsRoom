@@ -41,18 +41,25 @@ def command() -> str:
 
 
 def codex_command() -> str:
-    return f'"{sys.executable}" "{ROOT / "hooks" / "codex_capture.py"}"'
+    python = str(Path(sys.executable).resolve())
+    script = str(ROOT / "hooks" / "codex_capture.py")
+    if os.name == "nt":
+        # Codex command hooks on Windows can fail before Python starts when the
+        # executable itself is the first quoted token. Let cmd.exe own the
+        # quoting so paths with spaces remain safe.
+        return f'cmd.exe /d /s /c ""{python}" "{script}""'
+    return f'"{python}" "{script}"'
 
 
 def _command_targets(value: object, script: Path) -> bool:
     if not isinstance(value, str):
         return False
-    match = re.fullmatch(r'\s*(?:&\s*)?"[^"]+"\s+"([^"]+)"\s*', value)
-    if not match:
-        return False
-    actual = os.path.normcase(os.path.normpath(match.group(1)))
     expected = os.path.normcase(os.path.normpath(str(script)))
-    return actual == expected
+    for candidate in re.findall(r'"([^"]+)"', value):
+        actual = os.path.normcase(os.path.normpath(candidate))
+        if actual == expected:
+            return True
+    return False
 
 
 def _our_hook(item: dict) -> bool:
@@ -76,11 +83,13 @@ def load_settings(path: Path, label: str = "Claude Code") -> dict:
     return data
 
 
-def save_settings(path: Path, settings: dict) -> None:
+def save_settings(path: Path, settings: dict, *, preserve_bom: bool = True) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     encoding = (
         "utf-8-sig"
-        if path.exists() and path.read_bytes().startswith(b"\xef\xbb\xbf")
+        if preserve_bom
+        and path.exists()
+        and path.read_bytes().startswith(b"\xef\xbb\xbf")
         else "utf-8"
     )
     path.write_text(
@@ -179,7 +188,9 @@ def install_codex_hooks(path: Path) -> None:
                 group["matcher"] = CODEX_SESSION_START_MATCHER
             groups.append(group)
 
-    save_settings(path, settings)
+    # Codex rejects hooks.json with a UTF-8 BOM on Windows, so always write its
+    # config as plain UTF-8 even if a previous editor introduced a BOM.
+    save_settings(path, settings, preserve_bom=False)
     print(f"Hooks do Codex registrados em {path}")
     print("Abra `/hooks` no Codex e revise/confie nas novas definições antes de usá-las.")
 
@@ -217,7 +228,7 @@ def remove_codex_hooks(path: Path) -> None:
 
     if not hooks:
         settings.pop("hooks", None)
-    save_settings(path, settings)
+    save_settings(path, settings, preserve_bom=False)
     print(f"Hooks do Codex removidos de {path}")
 
 
