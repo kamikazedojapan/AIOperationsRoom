@@ -70,12 +70,44 @@ def test_codex_hook_registration_preserves_existing_hooks(tmp_path):
     }
 
 
-def test_codex_windows_command_uses_cmd_wrapper():
-    command = cli.codex_command(windows=True)
-
-    assert command.startswith('cmd.exe /d /s /c ""')
-    assert "codex_capture.py" in command
-    assert cli._command_targets(
-        command,
-        cli.ROOT / "hooks" / "codex_capture.py",
+def test_codex_windows_command_uses_wrapper(tmp_path):
+    wrapper = tmp_path / "codex-hook.cmd"
+    command = cli.codex_command(
+        windows=True,
+        wrapper_path=wrapper,
     )
+
+    assert command == f"cmd.exe /d /s /c {wrapper}"
+    assert '"' not in command
+
+
+def test_codex_wrapper_quotes_python_and_capture_script(
+    tmp_path,
+    monkeypatch,
+):
+    project = tmp_path / "Project With Spaces"
+    wrapper = tmp_path / "codex-hook.cmd"
+    python = tmp_path / "Python With Spaces" / "python.exe"
+
+    monkeypatch.setattr(cli, "ROOT", project)
+    monkeypatch.setattr(cli.sys, "executable", str(python))
+
+    written = cli.write_codex_wrapper(wrapper)
+    content = written.read_text(encoding="utf-8")
+
+    assert written == wrapper
+    assert content.startswith("@echo off\n")
+    assert f'"{python}"' in content
+    assert f'"{project / "hooks" / "codex_capture.py"}"' in content
+    assert "exit /b %ERRORLEVEL%" in content
+
+
+def test_wrapper_based_codex_hook_is_recognized():
+    item = {
+        "type": "command",
+        "command": "cmd.exe /d /s /c C:/Users/test/.ai-operations-room/codex-hook.cmd",
+        "commandWindows": "cmd.exe /d /s /c C:/Users/test/.ai-operations-room/codex-hook.cmd",
+        "statusMessage": cli.CODEX_STATUS_MESSAGE,
+    }
+
+    assert cli._our_codex_hook(item)
