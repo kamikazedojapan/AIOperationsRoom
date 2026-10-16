@@ -14,11 +14,25 @@ from backend.config import ROOT
 from backend.events_contract import EventName, EventSource
 
 
-EVENTS = ("SessionStart", "UserPromptSubmit", "Stop", "SubagentStart", "SubagentStop", "SessionEnd")
+EVENTS = (
+    "SessionStart",
+    "UserPromptSubmit",
+    "Stop",
+    "SubagentStart",
+    "SubagentStop",
+    "SessionEnd",
+)
+
+CODEX_EVENTS = EVENTS
+CODEX_SESSION_START_MATCHER = "^(startup|resume|clear|fork)$"
 
 
 def settings_path() -> Path:
     return Path.home() / ".claude" / "settings.json"
+
+
+def codex_hooks_path() -> Path:
+    return Path.home() / ".codex" / "hooks.json"
 
 
 def command() -> str:
@@ -26,28 +40,53 @@ def command() -> str:
     return f"& {invocation}" if os.name == "nt" else invocation
 
 
-def _our_hook(item: dict) -> bool:
-    value = item.get("command")
+def codex_command() -> str:
+    return f'"{sys.executable}" "{ROOT / "hooks" / "codex_capture.py"}"'
+
+
+def _command_targets(value: object, script: Path) -> bool:
     if not isinstance(value, str):
         return False
     match = re.fullmatch(r'\s*(?:&\s*)?"[^"]+"\s+"([^"]+)"\s*', value)
-    return bool(match and os.path.normcase(os.path.normpath(match.group(1))) ==
-                os.path.normcase(os.path.normpath(str(ROOT / "hooks" / "capture.py"))))
+    if not match:
+        return False
+    actual = os.path.normcase(os.path.normpath(match.group(1)))
+    expected = os.path.normcase(os.path.normpath(str(script)))
+    return actual == expected
 
 
-def load_settings(path: Path) -> dict:
+def _our_hook(item: dict) -> bool:
+    return _command_targets(item.get("command"), ROOT / "hooks" / "capture.py")
+
+
+def _our_codex_hook(item: dict) -> bool:
+    script = ROOT / "hooks" / "codex_capture.py"
+    return any(
+        _command_targets(item.get(field), script)
+        for field in ("command", "commandWindows", "command_windows")
+    )
+
+
+def load_settings(path: Path, label: str = "Claude Code") -> dict:
     if not path.exists():
         return {}
     data = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
-        raise ValueError("O arquivo de configurações do Claude Code precisa ser um objeto JSON.")
+        raise ValueError(f"O arquivo de configurações do {label} precisa ser um objeto JSON.")
     return data
 
 
 def save_settings(path: Path, settings: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    encoding = "utf-8-sig" if path.exists() and path.read_bytes().startswith(b"\xef\xbb\xbf") else "utf-8"
-    path.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding=encoding)
+    encoding = (
+        "utf-8-sig"
+        if path.exists() and path.read_bytes().startswith(b"\xef\xbb\xbf")
+        else "utf-8"
+    )
+    path.write_text(
+        json.dumps(settings, ensure_ascii=False, indent=2) + "\n",
+        encoding=encoding,
+    )
 
 
 def install_hooks(path: Path) -> None:
@@ -94,13 +133,99 @@ def remove_hooks(path: Path) -> None:
     print(f"Hooks removidos de {path}")
 
 
+def _configure_codex_hook(item: dict, event: str) -> None:
+    invocation = codex_command()
+    item.update(
+        {
+            "type": "command",
+            "command": invocation,
+            "commandWindows": invocation,
+            "timeout": 3 if event == "SessionEnd" else 5,
+            "statusMessage": "AI Operations Room telemetry",
+        }
+    )
+
+
+def install_codex_hooks(path: Path) -> None:
+    settings = load_settings(path, "Codex")
+    hooks = settings.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ValueError("A chave `hooks` do Codex precisa ser um objeto JSON.")
+
+    for event in CODEX_EVENTS:
+        groups = hooks.setdefault(event, [])
+        if not isinstance(groups, list):
+            raise ValueError(f"A configuração de hooks `{event}` do Codex precisa ser uma lista.")
+
+        found = False
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            items = group.get("hooks", [])
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if isinstance(item, dict) and _our_codex_hook(item):
+                    _configure_codex_hook(item, event)
+                    if event == "SessionStart":
+                        group["matcher"] = CODEX_SESSION_START_MATCHER
+                    found = True
+
+        if not found:
+            hook: dict = {}
+            _configure_codex_hook(hook, event)
+            group = {"hooks": [hook]}
+            if event == "SessionStart":
+                group["matcher"] = CODEX_SESSION_START_MATCHER
+            groups.append(group)
+
+    save_settings(path, settings)
+    print(f"Hooks do Codex registrados em {path}")
+    print("Abra `/hooks` no Codex e revise/confie nas novas definições antes de usá-las.")
+
+
+def remove_codex_hooks(path: Path) -> None:
+    settings = load_settings(path, "Codex")
+    hooks = settings.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return
+
+    for event in CODEX_EVENTS:
+        groups = hooks.get(event, [])
+        if not isinstance(groups, list):
+            continue
+        remaining = []
+        for group in groups:
+            if not isinstance(group, dict):
+                remaining.append(group)
+                continue
+            items = group.get("hooks", [])
+            if not isinstance(items, list):
+                remaining.append(group)
+                continue
+            kept = [
+                item
+                for item in items
+                if not (isinstance(item, dict) and _our_codex_hook(item))
+            ]
+            if kept:
+                remaining.append({**group, "hooks": kept})
+        if remaining:
+            hooks[event] = remaining
+        else:
+            hooks.pop(event, None)
+
+    if not hooks:
+        settings.pop("hooks", None)
+    save_settings(path, settings)
+    print(f"Hooks do Codex removidos de {path}")
+
+
 def demo_events() -> list[dict]:
     now = datetime.now(timezone.utc)
 
     def at(minutes: int) -> str:
-        return (
-            now + timedelta(minutes=minutes)
-        ).isoformat(timespec="seconds")
+        return (now + timedelta(minutes=minutes)).isoformat(timespec="seconds")
 
     return [
         {
@@ -135,7 +260,7 @@ def demo_events() -> list[dict]:
             "source": EventSource.CLAUDE_CODE,
             "session_id": "demo-orion",
             "cwd": "/demo/orion",
-            "t": at(-10)
+            "t": at(-10),
         },
         {
             "id": "demo-05",
@@ -171,7 +296,7 @@ def demo_events() -> list[dict]:
             "cwd": "/demo/aurora",
             "reason": "other",
             "t": at(-20),
-        }
+        },
     ]
 
 
@@ -188,10 +313,15 @@ def seed_demo(path: Path) -> None:
             con.execute(f"DELETE FROM {table} WHERE session_id LIKE 'demo-%'")
         con.execute("DELETE FROM ingestao WHERE chave IN ('events_offset', 'events_prefix')")
         if not projects.list_all(con):
-            for name, folder in (("Atlas CRM", "/demo/atlas"), ("Orion Flow", "/demo/orion"), ("Aurora Hub", "/demo/aurora")):
+            for name, folder in (
+                ("Atlas CRM", "/demo/atlas"),
+                ("Orion Flow", "/demo/orion"),
+                ("Aurora Hub", "/demo/aurora"),
+            ):
                 projects.save(con, nome=name, caminho_local=folder)
     (path / "events.jsonl").write_text(
-        "".join(json.dumps(event, ensure_ascii=False) + "\n" for event in demo_events()), encoding="utf-8"
+        "".join(json.dumps(event, ensure_ascii=False) + "\n" for event in demo_events()),
+        encoding="utf-8",
     )
     (path / ".demo-mode").write_text("AI Operations Room demo\n", encoding="utf-8")
     print(f"Dados fictícios criados em {path}")
@@ -201,27 +331,44 @@ def serve(data_dir: str | None, port: int = 8765) -> None:
     if data_dir:
         os.environ["AI_OPERATIONS_ROOM_DATA_DIR"] = data_dir
     import uvicorn
+
     uvicorn.run("backend.api:app", host="127.0.0.1", port=port)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="ai-operations-room")
     commands = parser.add_subparsers(dest="action", required=True)
+
     for name in ("install", "remove"):
         item = commands.add_parser(f"hooks-{name}")
         item.add_argument("--settings", type=Path, default=settings_path())
+
+    for name in ("install", "remove"):
+        item = commands.add_parser(f"codex-hooks-{name}")
+        item.add_argument("--settings", type=Path, default=codex_hooks_path())
+
     demo = commands.add_parser("demo")
-    demo.add_argument("--data-dir", type=Path, default=Path.home() / ".ai-operations-room-demo")
+    demo.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path.home() / ".ai-operations-room-demo",
+    )
     demo.add_argument("--serve", action="store_true")
     demo.add_argument("--port", type=int, default=8765)
+
     server = commands.add_parser("serve")
     server.add_argument("--data-dir")
     server.add_argument("--port", type=int, default=8765)
+
     args = parser.parse_args()
     if args.action == "hooks-install":
         install_hooks(args.settings)
     elif args.action == "hooks-remove":
         remove_hooks(args.settings)
+    elif args.action == "codex-hooks-install":
+        install_codex_hooks(args.settings)
+    elif args.action == "codex-hooks-remove":
+        remove_codex_hooks(args.settings)
     elif args.action == "demo":
         seed_demo(args.data_dir)
         if args.serve:
