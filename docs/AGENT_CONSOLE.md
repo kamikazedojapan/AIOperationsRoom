@@ -33,7 +33,9 @@ The first UI version uses one-second polling against `/api/tasks/{task_id}/event
 
 ## OpenAI session lifetime
 
-Agent Console currently treats each task as one-shot. After a completed/cancelled task, the provider deletes the managed OpenAI Agent session and records `session.finished` from that real cleanup action. Set `AI_OPERATIONS_ROOM_KEEP_OPENAI_SESSIONS=1` to retain managed sessions for debugging or a future multi-turn console.
+Agent Console currently treats each task as one-shot. After a completed/cancelled task, the provider deletes the managed OpenAI Agent session unless `AI_OPERATIONS_ROOM_KEEP_OPENAI_SESSIONS=1` is set.
+
+The successful DELETE is recorded as a local Operations Room observation with `source_event = client.session.delete`; it is not presented as an event emitted by OpenAI. That local observation projects `session.finished` for the managed session.
 
 ## Project selector limitation
 
