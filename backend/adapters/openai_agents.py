@@ -14,6 +14,7 @@ OPENAI_AGENT_EVENT_MAP = {
     "agent.session.subagent.active": EventName.AGENT_STARTED,
     "agent.session.subagent.closed": EventName.AGENT_FINISHED,
     "agent.session.turn.completed": EventName.TURN_FINISHED,
+    "agent.session.deleted": EventName.SESSION_FINISHED,
 }
 
 
@@ -77,5 +78,8 @@ def normalize_openai_agent_event(payload: dict) -> dict | None:
         agent_type = subagent.get("name") or subagent.get("type")
         if isinstance(agent_type, str) and agent_type:
             event["agent_type"] = agent_type
+
+    if source_event == "agent.session.deleted":
+        event["reason"] = "deleted"
 
     return event
