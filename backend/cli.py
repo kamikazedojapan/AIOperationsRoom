@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.config import ROOT
+from backend.events_contract import EventName, EventSource
 
 
 EVENTS = ("SessionStart", "UserPromptSubmit", "Stop", "SubagentStart", "SubagentStop", "SessionEnd")
@@ -95,17 +96,82 @@ def remove_hooks(path: Path) -> None:
 
 def demo_events() -> list[dict]:
     now = datetime.now(timezone.utc)
+
     def at(minutes: int) -> str:
-        return (now + timedelta(minutes=minutes)).isoformat(timespec="seconds")
+        return (
+            now + timedelta(minutes=minutes)
+        ).isoformat(timespec="seconds")
+
     return [
-        {"id": "demo-01", "evento": "SessionStart", "session_id": "demo-atlas", "cwd": "/demo/atlas", "t": at(-12)},
-        {"id": "demo-02", "evento": "UserPromptSubmit", "session_id": "demo-atlas", "cwd": "/demo/atlas", "t": at(-11)},
-        {"id": "demo-03", "evento": "SubagentStart", "session_id": "demo-atlas", "agent_id": "demo-review", "agent_type": "reviewer", "cwd": "/demo/atlas", "t": at(-8)},
-        {"id": "demo-04", "evento": "SessionStart", "session_id": "demo-orion", "cwd": "/demo/orion", "t": at(-10)},
-        {"id": "demo-05", "evento": "Stop", "session_id": "demo-orion", "cwd": "/demo/orion", "t": at(-2)},
-        {"id": "demo-06", "evento": "SessionStart", "session_id": "demo-aurora", "cwd": "/demo/aurora", "t": at(-30)},
-        {"id": "demo-07", "evento": "SubagentStart", "session_id": "demo-aurora", "agent_id": "demo-index", "agent_type": "Explore", "cwd": "/demo/aurora", "t": at(-28)},
-        {"id": "demo-08", "evento": "SessionEnd", "session_id": "demo-aurora", "cwd": "/demo/aurora", "reason": "other", "t": at(-20)},
+        {
+            "id": "demo-01",
+            "evento": EventName.SESSION_STARTED,
+            "source": EventSource.CLAUDE_CODE,
+            "session_id": "demo-atlas",
+            "cwd": "/demo/atlas",
+            "t": at(-12),
+        },
+        {
+            "id": "demo-02",
+            "evento": EventName.TURN_STARTED,
+            "source": EventSource.CLAUDE_CODE,
+            "session_id": "demo-atlas",
+            "cwd": "/demo/atlas",
+            "t": at(-11),
+        },
+        {
+            "id": "demo-03",
+            "evento": EventName.AGENT_STARTED,
+            "source": EventSource.CLAUDE_CODE,
+            "session_id": "demo-atlas",
+            "agent_id": "demo-review",
+            "agent_type": "reviewer",
+            "cwd": "/demo/orion",
+            "t": at(-8),
+        },
+        {
+            "id": "demo-04",
+            "evento": EventName.SESSION_STARTED,
+            "source": EventSource.CLAUDE_CODE,
+            "session_id": "demo-orion",
+            "cwd": "/demo/orion",
+            "t": at(-10)
+        },
+        {
+            "id": "demo-05",
+            "evento": EventName.TURN_FINISHED,
+            "source": EventSource.CLAUDE_CODE,
+            "session_id": "demo-orion",
+            "cwd": "/demo/orion",
+            "t": at(-2),
+        },
+        {
+            "id": "demo-06",
+            "evento": EventName.SESSION_STARTED,
+            "source": EventSource.CLAUDE_CODE,
+            "session_id": "demo-aurora",
+            "cwd": "/demo/aurora",
+            "t": at(-30),
+        },
+        {
+            "id": "demo-07",
+            "evento": EventName.AGENT_STARTED,
+            "source": EventSource.CLAUDE_CODE,
+            "session_id": "demo-aurora",
+            "agent_id": "demo-index",
+            "agent_type": "Explore",
+            "cwd": "/demo/aurora",
+            "t": at(-28),
+        },
+        {
+            "id": "demo-08",
+            "evento": EventName.SESSION_FINISHED,
+            "source": EventSource.CLAUDE_CODE,
+            "session_id": "demo-aurora",
+            "cwd": "/demo/aurora",
+            "reason": "other",
+            "t": at(-20),
+        }
     ]
 
 
