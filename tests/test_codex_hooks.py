@@ -70,10 +70,8 @@ def test_codex_hook_registration_preserves_existing_hooks(tmp_path):
     }
 
 
-def test_codex_windows_command_uses_cmd_wrapper(monkeypatch):
-    monkeypatch.setattr(cli.os, "name", "nt")
-
-    command = cli.codex_command()
+def test_codex_windows_command_uses_cmd_wrapper():
+    command = cli.codex_command(windows=True)
 
     assert command.startswith('cmd.exe /d /s /c ""')
     assert "codex_capture.py" in command
