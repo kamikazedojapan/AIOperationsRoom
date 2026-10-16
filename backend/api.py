@@ -51,8 +51,12 @@ def list_projects(con: sqlite3.Connection = Depends(database)) -> list[dict]:
 
 def _save(con: sqlite3.Connection, data: ProjectInput, project_id: int | None = None) -> dict:
     try:
-        return projects.save(con, nome=data.nome, caminho_local=data.caminho_local,
-                             project_id=project_id)
+        return projects.save(
+            con,
+            nome=data.nome,
+            caminho_local=data.caminho_local,
+            project_id=project_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except sqlite3.IntegrityError as exc:
@@ -65,8 +69,11 @@ def create_project(data: ProjectInput, con: sqlite3.Connection = Depends(databas
 
 
 @app.put("/api/projetos/{project_id}")
-def update_project(project_id: int, data: ProjectInput,
-                   con: sqlite3.Connection = Depends(database)) -> dict:
+def update_project(
+    project_id: int,
+    data: ProjectInput,
+    con: sqlite3.Connection = Depends(database),
+) -> dict:
     if projects.get(con, project_id) is None:
         raise HTTPException(status_code=404, detail="Projeto não encontrado.")
     return _save(con, data, project_id)
@@ -87,7 +94,8 @@ def _set_archive(con: sqlite3.Connection, project_id: int, archived: bool) -> di
         raise HTTPException(status_code=404, detail="Projeto não encontrado.")
     con.execute(
         "UPDATE projeto SET arquivado = ?, atualizado_em = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') "
-        "WHERE id = ?", (int(archived), project_id),
+        "WHERE id = ?",
+        (int(archived), project_id),
     )
     return projects.public(projects.get(con, project_id))
 
@@ -105,8 +113,19 @@ def list_sessions(con: sqlite3.Connection = Depends(database)) -> dict:
     ingest(con)
     mapped = projects.list_all(con)
     rows = con.execute(
-        "SELECT session_id, cwd, ultimo_evento, ultima_atualizacao "
-        "FROM sessao WHERE cwd <> '' ORDER BY ultima_atualizacao DESC LIMIT 200"
+        """
+        SELECT
+            session_key,
+            source,
+            session_id,
+            cwd,
+            ultimo_evento,
+            ultima_atualizacao
+        FROM sessao
+        WHERE cwd <> ''
+        ORDER BY ultima_atualizacao DESC
+        LIMIT 200
+        """
     ).fetchall()
     sessions = []
     for row in rows:
@@ -123,9 +142,11 @@ def _project_for(cwd: str, mapped: list[dict]) -> dict | None:
 
 
 @app.get("/api/painel")
-def dashboard(horas: int = Query(6, ge=1, le=24),
-              convivencia: int = Query(12, ge=0, le=24),
-              con: sqlite3.Connection = Depends(database)) -> dict:
+def dashboard(
+    horas: int = Query(6, ge=1, le=24),
+    convivencia: int = Query(12, ge=0, le=24),
+    con: sqlite3.Connection = Depends(database),
+) -> dict:
     ingest(con)
     reconcile(con)
     mapped = projects.list_all(con)
@@ -135,19 +156,38 @@ def dashboard(horas: int = Query(6, ge=1, le=24),
     rows = con.execute(
         "SELECT * FROM execucao WHERE estado IN ('trabalhando', 'delegando', 'aguardando') "
         "OR julianday(criado_em) >= julianday(?) OR julianday(atualizado_em) >= julianday(?) "
-        "ORDER BY atualizado_em DESC", (window, visible)
+        "ORDER BY atualizado_em DESC",
+        (window, visible),
     ).fetchall()
     items = [runs.public(row, _project_for(row["cwd"], mapped)) for row in rows]
     active = runs.ACTIVE
-    summary_items = [item for item in items if item["estado"] in active or
-                     _in_window(item["criado_em"], window) or _in_window(item["atualizado_em"], window)]
-    principals_with_children = {row["pai_chave"] for row in con.execute(
-        "SELECT DISTINCT pai_chave FROM execucao WHERE pai_chave IS NOT NULL"
-    )}
-    room_items = [item for item in items if item["estado"] in active or
-                  (convivencia and _in_window(item["atualizado_em"], visible) and
-                   (item["pai_chave"] is not None or item["chave"] in principals_with_children or
-                    _duration(item) >= 30))]
+    summary_items = [
+        item
+        for item in items
+        if item["estado"] in active
+        or _in_window(item["criado_em"], window)
+        or _in_window(item["atualizado_em"], window)
+    ]
+    principals_with_children = {
+        row["pai_chave"]
+        for row in con.execute(
+            "SELECT DISTINCT pai_chave FROM execucao WHERE pai_chave IS NOT NULL"
+        )
+    }
+    room_items = [
+        item
+        for item in items
+        if item["estado"] in active
+        or (
+            convivencia
+            and _in_window(item["atualizado_em"], visible)
+            and (
+                item["pai_chave"] is not None
+                or item["chave"] in principals_with_children
+                or _duration(item) >= 30
+            )
+        )
+    ]
     history: dict[str, list[dict]] = {}
     for item in sorted(summary_items, key=lambda x: x["criado_em"], reverse=True):
         history.setdefault(item["tipo"], []).append(item)
@@ -160,9 +200,17 @@ def dashboard(horas: int = Query(6, ge=1, le=24),
         "historico_tipos": history,
         "sessoes": [item for item in summary_items if item["pai_chave"] is None],
         "resumo": {
-            **{state: sum(item["estado"] == state for item in summary_items)
-               for state in ("trabalhando", "delegando", "aguardando", "concluida", "orfa")},
-            "sessoes_ativas": len({item["session_id"] for item in summary_items if item["estado"] in active}),
+            **{
+                state: sum(item["estado"] == state for item in summary_items)
+                for state in ("trabalhando", "delegando", "aguardando", "concluida", "orfa")
+            },
+            "sessoes_ativas": len(
+                {
+                    item["session_key"]
+                    for item in summary_items
+                    if item["estado"] in active
+                }
+            ),
             "execucoes_na_janela": len(summary_items),
         },
     }
@@ -184,23 +232,84 @@ def _duration(item: dict) -> float:
         return 0
 
 
+def _history_rows(con: sqlite3.Connection, source: str, session_id: str) -> list[sqlite3.Row]:
+    return con.execute(
+        """
+        SELECT id, session_key, source, session_id, nome, ocorrido_em, dados
+        FROM evento
+        WHERE source = ? AND session_id = ?
+        ORDER BY ocorrido_em DESC, id DESC
+        LIMIT 100
+        """,
+        (source, session_id),
+    ).fetchall()
+
+
+def _agent_rows(con: sqlite3.Connection, source: str, session_id: str) -> list[sqlite3.Row]:
+    return con.execute(
+        """
+        SELECT *
+        FROM execucao
+        WHERE source = ? AND session_id = ?
+        ORDER BY pai_chave, criado_em
+        """,
+        (source, session_id),
+    ).fetchall()
+
+
+def _legacy_source(con: sqlite3.Connection, session_id: str) -> str | None:
+    rows = con.execute(
+        "SELECT DISTINCT source FROM sessao WHERE session_id = ? ORDER BY source",
+        (session_id,),
+    ).fetchall()
+    if not rows:
+        return None
+    if len(rows) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="session_id ambíguo; informe também o source.",
+        )
+    return rows[0]["source"]
+
+
+@app.get("/api/sessoes/{source}/{session_id}/historico")
+def provider_session_history(
+    source: str,
+    session_id: str,
+    con: sqlite3.Connection = Depends(database),
+) -> dict:
+    ingest(con)
+    return {"eventos": [dict(row) for row in _history_rows(con, source, session_id)]}
+
+
+@app.get("/api/sessoes/{source}/{session_id}/agentes")
+def provider_session_agents(
+    source: str,
+    session_id: str,
+    con: sqlite3.Connection = Depends(database),
+) -> dict:
+    ingest(con)
+    return {"agentes": [dict(row) for row in _agent_rows(con, source, session_id)]}
+
+
 @app.get("/api/sessoes/{session_id}/historico")
 def session_history(session_id: str, con: sqlite3.Connection = Depends(database)) -> dict:
+    """Compatibility route for native IDs that are unique across known sources."""
     ingest(con)
-    rows = con.execute(
-        "SELECT id, nome, ocorrido_em, dados FROM evento WHERE session_id = ? "
-        "ORDER BY ocorrido_em DESC, id DESC LIMIT 100", (session_id,)
-    ).fetchall()
-    return {"eventos": [dict(row) for row in rows]}
+    source = _legacy_source(con, session_id)
+    if source is None:
+        return {"eventos": []}
+    return {"eventos": [dict(row) for row in _history_rows(con, source, session_id)]}
 
 
 @app.get("/api/sessoes/{session_id}/agentes")
 def session_agents(session_id: str, con: sqlite3.Connection = Depends(database)) -> dict:
+    """Compatibility route for native IDs that are unique across known sources."""
     ingest(con)
-    rows = con.execute(
-        "SELECT * FROM execucao WHERE session_id = ? ORDER BY pai_chave, criado_em", (session_id,)
-    ).fetchall()
-    return {"agentes": [dict(row) for row in rows]}
+    source = _legacy_source(con, session_id)
+    if source is None:
+        return {"agentes": []}
+    return {"agentes": [dict(row) for row in _agent_rows(con, source, session_id)]}
 
 
 @app.get("/")
@@ -223,4 +332,5 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND)), name="static")
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("backend.api:app", host="127.0.0.1", port=8765)
