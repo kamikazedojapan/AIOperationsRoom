@@ -56,6 +56,34 @@ function formatTime(value) {
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleString('pt-BR');
 }
 
+function selectedProvider() {
+  return providers.find((provider) => provider.source === $('#task-source').value) || null;
+}
+
+function renderModelSelector() {
+  const field = $('#task-model-field');
+  const select = $('#task-model');
+  const provider = selectedProvider();
+  const supportsModels = Boolean(
+    provider?.available &&
+    provider.capabilities?.model_selection &&
+    Array.isArray(provider.models) &&
+    provider.models.length
+  );
+
+  field.hidden = !supportsModels;
+  if (!supportsModels) {
+    select.innerHTML = '';
+    return;
+  }
+
+  const previous = select.value;
+  select.innerHTML = provider.models
+    .map((model) => `<option value="${esc(model)}">${esc(model)}</option>`)
+    .join('');
+  if (provider.models.includes(previous)) select.value = previous;
+}
+
 function renderProviderCatalog() {
   const source = $('#task-source');
   source.innerHTML = providers.map((provider) => (
@@ -68,8 +96,12 @@ function renderProviderCatalog() {
     ? `${available.length} provider(s) disponível(is)`
     : 'Nenhum provider disponível';
 
+  const codex = providers.find((provider) => provider.source === 'codex' && provider.available);
   const openai = providers.find((provider) => provider.source === 'openai_api' && provider.available);
-  if (openai) source.value = 'openai_api';
+  if (codex) source.value = 'codex';
+  else if (openai) source.value = 'openai_api';
+
+  renderModelSelector();
 
   $('#task-agent').innerHTML = agents.map((agent) => (
     `<option value="${esc(agent)}">${esc(agent)}</option>`
@@ -94,11 +126,12 @@ function renderTasks() {
     const deleteTitle = deletable
       ? 'Excluir task'
       : 'Cancele ou aguarde a conclusão antes de excluir';
+    const model = task.model ? ` · ${esc(task.model)}` : '';
     return `<div class="console-task-row${selected}">
       <button class="console-task-card${selected}" type="button" data-task-id="${esc(task.id)}">
         <span class="console-task-card-top"><strong>${esc(task.agent)}</strong><span class="console-status status-${esc(task.status)}">${esc(statusLabels[task.status] || task.status)}</span></span>
         <span class="console-task-preview">${esc(preview)}</span>
-        <small>${esc(sourceName(task.source))} · ${esc(formatTime(task.updated_at))}</small>
+        <small>${esc(sourceName(task.source))}${model} · ${esc(formatTime(task.updated_at))}</small>
       </button>
       <button
         class="console-task-delete"
@@ -126,12 +159,18 @@ function renderSelectedTask() {
   status.className = `console-status status-${selectedTask.status}`;
 
   const project = projects.find((item) => item.id === selectedTask.project_id);
-  $('#task-meta').innerHTML = [
+  const meta = [
     `<span><b>Provider:</b> ${esc(sourceName(selectedTask.source))}</span>`,
     `<span><b>Projeto:</b> ${esc(project?.nome || 'Sem projeto')}</span>`,
+  ];
+  if (selectedTask.model) {
+    meta.push(`<span><b>Modelo:</b> ${esc(selectedTask.model)}</span>`);
+  }
+  meta.push(
     `<span><b>Sessão:</b> ${esc(selectedTask.provider_session_id || '—')}</span>`,
     `<span><b>Criada:</b> ${esc(formatTime(selectedTask.created_at))}</span>`,
-  ].join('');
+  );
+  $('#task-meta').innerHTML = meta.join('');
 
   $('#task-timeline').innerHTML = timeline.length
     ? timeline.map((event) => `<li>
@@ -234,6 +273,7 @@ async function submitTask() {
   const agent = $('#task-agent').value;
   const prompt = $('#task-prompt').value.trim();
   const projectValue = $('#task-project').value;
+  const modelValue = $('#task-model-field').hidden ? '' : $('#task-model').value;
 
   if (!source) return showNotice('Nenhum provider disponível.', true);
   if (!prompt) return showNotice('Descreva a tarefa antes de executar.', true);
@@ -245,6 +285,7 @@ async function submitTask() {
       agent,
       prompt,
       project_id: projectValue ? Number(projectValue) : null,
+      model: modelValue || null,
     });
     tasks.unshift(task);
     $('#task-prompt').value = '';
@@ -314,6 +355,7 @@ async function bootstrap() {
 $('#send-task').addEventListener('click', submitTask);
 $('#cancel-task').addEventListener('click', cancelSelected);
 $('#new-task').addEventListener('click', resetComposer);
+$('#task-source').addEventListener('change', renderModelSelector);
 $('#task-list').addEventListener('click', (event) => {
   const deleteButton = event.target.closest('[data-delete-task-id]');
   if (deleteButton) {
