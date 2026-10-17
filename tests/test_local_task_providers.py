@@ -1,9 +1,63 @@
 from __future__ import annotations
 
+import io
+import subprocess
+import threading
 from types import SimpleNamespace
+
+import pytest
 
 from backend import task_runner
 from backend.providers import codex_local, ollama_local
+
+
+class _FakeStdin:
+    def write(self, value: str) -> int:
+        return len(value)
+
+    def close(self) -> None:
+        pass
+
+
+class _BlockingStdout:
+    def __init__(self, released: threading.Event) -> None:
+        self.released = released
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> str:
+        self.released.wait(timeout=2)
+        raise StopIteration
+
+
+class _FakeCodexProcess:
+    def __init__(self) -> None:
+        self.pid = 1234
+        self.stdin = _FakeStdin()
+        self.released = threading.Event()
+        self.stdout = _BlockingStdout(self.released)
+        self.stderr = io.StringIO("")
+        self.returncode: int | None = None
+        self.stopped = False
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.stopped = True
+        self.returncode = -15
+        self.released.set()
+
+    def kill(self) -> None:
+        self.stopped = True
+        self.returncode = -9
+        self.released.set()
+
+    def wait(self, timeout=None):
+        if self.returncode is None:
+            raise subprocess.TimeoutExpired("codex", timeout or 0)
+        return self.returncode
 
 
 def test_codex_provider_detects_cli(monkeypatch):
@@ -62,6 +116,29 @@ def test_codex_provider_falls_back_to_workspace_write(monkeypatch):
     )
 
     assert provider._automation_args("codex") == ["--sandbox", "workspace-write"]
+
+
+def test_codex_provider_cancels_without_waiting_for_stdout(monkeypatch):
+    provider = codex_local.CodexTaskProvider()
+    process = _FakeCodexProcess()
+    monkeypatch.setattr(provider, "_executable", lambda: "codex")
+    monkeypatch.setattr(provider, "_automation_args", lambda executable: [])
+    monkeypatch.setattr(provider, "_cwd", lambda task: None)
+    monkeypatch.setattr(codex_local.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(
+        provider,
+        "_stop_process",
+        lambda proc, windows=None: proc.terminate(),
+    )
+
+    with pytest.raises(task_runner.TaskCancelled):
+        provider.run(
+            {"id": "cancel-me", "prompt": "long task", "project_id": None},
+            lambda *args, **kwargs: None,
+            lambda: True,
+        )
+
+    assert process.stopped is True
 
 
 def test_ollama_provider_exposes_installed_models(monkeypatch):
