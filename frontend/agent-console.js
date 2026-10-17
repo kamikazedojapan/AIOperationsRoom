@@ -14,6 +14,7 @@ const statusLabels = {
 const sourceLabels = {
   openai_api: 'OpenAI Agents API',
   codex: 'Codex',
+  ollama: 'Ollama Local',
   claude_code: 'Claude Code',
 };
 const finalStatuses = new Set(['completed', 'failed', 'cancelled']);
@@ -89,11 +90,25 @@ function renderTasks() {
   root.innerHTML = tasks.map((task) => {
     const selected = selectedTask?.id === task.id ? ' selected' : '';
     const preview = task.prompt.length > 70 ? `${task.prompt.slice(0, 70)}…` : task.prompt;
-    return `<button class="console-task-card${selected}" type="button" data-task-id="${esc(task.id)}">
-      <span class="console-task-card-top"><strong>${esc(task.agent)}</strong><span class="console-status status-${esc(task.status)}">${esc(statusLabels[task.status] || task.status)}</span></span>
-      <span class="console-task-preview">${esc(preview)}</span>
-      <small>${esc(sourceName(task.source))} · ${esc(formatTime(task.updated_at))}</small>
-    </button>`;
+    const deletable = finalStatuses.has(task.status);
+    const deleteTitle = deletable
+      ? 'Excluir task'
+      : 'Cancele ou aguarde a conclusão antes de excluir';
+    return `<div class="console-task-row${selected}">
+      <button class="console-task-card${selected}" type="button" data-task-id="${esc(task.id)}">
+        <span class="console-task-card-top"><strong>${esc(task.agent)}</strong><span class="console-status status-${esc(task.status)}">${esc(statusLabels[task.status] || task.status)}</span></span>
+        <span class="console-task-preview">${esc(preview)}</span>
+        <small>${esc(sourceName(task.source))} · ${esc(formatTime(task.updated_at))}</small>
+      </button>
+      <button
+        class="console-task-delete"
+        type="button"
+        data-delete-task-id="${esc(task.id)}"
+        aria-label="Excluir task ${esc(task.id.slice(0, 8))}"
+        title="${esc(deleteTitle)}"
+        ${deletable ? '' : 'disabled'}
+      >×</button>
+    </div>`;
   }).join('');
 }
 
@@ -199,12 +214,16 @@ function restartPolling() {
   }
 }
 
-function resetComposer() {
+function clearSelectedTask() {
   selectedTask = null;
   timeline = [];
   cursor = 0;
   stopPolling();
   $('#task-detail').hidden = true;
+}
+
+function resetComposer() {
+  clearSelectedTask();
   $('#task-prompt').value = '';
   $('#task-prompt').focus();
   renderTasks();
@@ -249,6 +268,29 @@ async function cancelSelected() {
   }
 }
 
+async function deleteTask(taskId) {
+  const task = tasks.find((item) => item.id === taskId);
+  if (!task) return;
+  if (!finalStatuses.has(task.status)) {
+    return showNotice('Cancele ou aguarde a conclusão da task antes de excluir.', true);
+  }
+
+  const accepted = window.confirm(
+    'Excluir esta task e toda a timeline? Esta ação não pode ser desfeita.'
+  );
+  if (!accepted) return;
+
+  try {
+    await request('DELETE', `/tasks/${encodeURIComponent(taskId)}`);
+    tasks = tasks.filter((item) => item.id !== taskId);
+    if (selectedTask?.id === taskId) clearSelectedTask();
+    renderTasks();
+    showNotice('Task excluída.');
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+}
+
 async function bootstrap() {
   try {
     const [catalog, projectList, taskPayload] = await Promise.all([
@@ -273,6 +315,14 @@ $('#send-task').addEventListener('click', submitTask);
 $('#cancel-task').addEventListener('click', cancelSelected);
 $('#new-task').addEventListener('click', resetComposer);
 $('#task-list').addEventListener('click', (event) => {
+  const deleteButton = event.target.closest('[data-delete-task-id]');
+  if (deleteButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    deleteTask(deleteButton.dataset.deleteTaskId).catch((error) => showNotice(error.message, true));
+    return;
+  }
+
   const card = event.target.closest('[data-task-id]');
   if (!card) return;
   selectTask(card.dataset.taskId).catch((error) => showNotice(error.message, true));
