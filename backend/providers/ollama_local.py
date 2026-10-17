@@ -9,6 +9,8 @@ import threading
 import time
 from urllib import error, request
 
+from backend import projects
+from backend.db import connect
 from backend.task_runner import ProviderResult, TaskCancelled
 
 
@@ -143,6 +145,34 @@ class OllamaTaskProvider:
         finally:
             items.put(("done", None))
 
+    @staticmethod
+    def _system_prompt(task: dict, project_context: dict | None) -> str:
+        prompt = AGENT_INSTRUCTIONS.get(task.get("agent"), AGENT_INSTRUCTIONS["general"])
+        if project_context is None:
+            return prompt
+        return (
+            f"{prompt}\n\n"
+            "Selected project metadata (context only; no implicit filesystem access):\n"
+            f"- name: {project_context['project_name']}\n"
+            f"- cwd: {project_context['cwd']}\n"
+            "Do not claim to have read files from this directory unless their contents are explicitly provided."
+        )
+
+    @staticmethod
+    def _project_context(task: dict) -> dict | None:
+        project_id = task.get("project_id")
+        if project_id is None:
+            return None
+        with connect() as con:
+            project = projects.get(con, int(project_id))
+        if project is None:
+            raise RuntimeError("Projeto selecionado não foi encontrado.")
+        return {
+            "project_id": int(project_id),
+            "project_name": project["nome"],
+            "cwd": project["caminho_local"],
+        }
+
     def run(self, task: dict, emit, is_cancelled) -> ProviderResult:
         installed = self.models()
         if not installed:
@@ -157,16 +187,24 @@ class OllamaTaskProvider:
                 f"Disponíveis: {', '.join(installed)}"
             )
 
-        local_run_id = f"ollama:{task['id']}"
+        project_context = self._project_context(task)
+        session_data = {"provider_session_id": f"ollama:{task['id']}", "model": model}
+        if project_context is not None:
+            session_data.update(project_context)
+        local_run_id = session_data["provider_session_id"]
+
         emit(
             "provider.session",
             source_event="ollama.local_run.started",
-            data={"provider_session_id": local_run_id, "model": model},
+            data=session_data,
         )
+        lifecycle_data = {"model": model}
+        if project_context is not None:
+            lifecycle_data.update(project_context)
         emit(
             "provider.lifecycle",
             source_event="ollama.chat.started",
-            data={"model": model},
+            data=lifecycle_data,
         )
 
         payload = {
@@ -174,10 +212,7 @@ class OllamaTaskProvider:
             "messages": [
                 {
                     "role": "system",
-                    "content": AGENT_INSTRUCTIONS.get(
-                        task.get("agent"),
-                        AGENT_INSTRUCTIONS["general"],
-                    ),
+                    "content": self._system_prompt(task, project_context),
                 },
                 {"role": "user", "content": task["prompt"]},
             ],
@@ -250,13 +285,16 @@ class OllamaTaskProvider:
                             record_output(safe_content)
 
                     if event_payload.get("done"):
+                        completed_data = {
+                            "model": event_payload.get("model") or model,
+                            "done_reason": event_payload.get("done_reason"),
+                        }
+                        if project_context is not None:
+                            completed_data.update(project_context)
                         emit(
                             "provider.lifecycle",
                             source_event="ollama.chat.completed",
-                            data={
-                                "model": event_payload.get("model") or model,
-                                "done_reason": event_payload.get("done_reason"),
-                            },
+                            data=completed_data,
                         )
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
