@@ -90,6 +90,27 @@ def get_task(
     return task
 
 
+@router.delete("/api/tasks/{task_id}")
+def delete_task(
+    task_id: str,
+    con: sqlite3.Connection = Depends(database),
+) -> dict:
+    task = task_store.get_task(con, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task não encontrada.")
+
+    if TaskStatus(task["status"]) not in FINAL_TASK_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail="A task ainda está ativa. Cancele ou aguarde a conclusão antes de excluir.",
+        )
+
+    if not task_store.delete_task(con, task_id):
+        raise HTTPException(status_code=404, detail="Task não encontrada.")
+
+    return {"deleted": task_id}
+
+
 @router.get("/api/tasks/{task_id}/events")
 def task_events(
     task_id: str,
