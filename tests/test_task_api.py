@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import backend.task_api as task_api
 from backend.api import app
+from backend.db import connect
 from backend.task_runner import (
     ProviderResult,
     register_provider,
@@ -151,6 +152,53 @@ def test_provider_catalog_exposes_registered_provider(client: TestClient):
 
     assert providers["fake_provider"]["available"] is True
     assert "coder" in payload["agents"]
+
+
+def test_completed_task_can_be_deleted_with_timeline(client: TestClient):
+    response = client.post(
+        "/api/tasks",
+        json={
+            "source": "fake_provider",
+            "agent": "general",
+            "prompt": "temporary task",
+        },
+    )
+    task_id = response.json()["id"]
+
+    assert client.get(f"/api/tasks/{task_id}").json()["status"] == "completed"
+
+    deleted = client.delete(f"/api/tasks/{task_id}")
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": task_id}
+    assert client.get(f"/api/tasks/{task_id}").status_code == 404
+
+    with connect() as con:
+        event_count = con.execute(
+            "SELECT COUNT(*) FROM task_event WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()[0]
+    assert event_count == 0
+
+
+def test_active_task_cannot_be_deleted(client: TestClient, monkeypatch):
+    monkeypatch.setattr(task_api, "submit_task", lambda task_id: None)
+    response = client.post(
+        "/api/tasks",
+        json={
+            "source": "fake_provider",
+            "agent": "general",
+            "prompt": "keep running",
+        },
+    )
+    task_id = response.json()["id"]
+
+    task = client.get(f"/api/tasks/{task_id}").json()
+    assert task["status"] == "queued"
+
+    deleted = client.delete(f"/api/tasks/{task_id}")
+    assert deleted.status_code == 409
+    assert "ainda está ativa" in deleted.json()["detail"]
+    assert client.get(f"/api/tasks/{task_id}").status_code == 200
 
 
 def test_agent_console_page_is_served(client: TestClient):
