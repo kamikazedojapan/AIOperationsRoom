@@ -49,14 +49,31 @@ def get_provider(source: str) -> TaskProvider | None:
     return _PROVIDERS.get(source)
 
 
+def _provider_capabilities(provider: TaskProvider) -> dict[str, bool]:
+    value = getattr(provider, "capabilities", None)
+    if callable(value):
+        value = value()
+    if not isinstance(value, dict):
+        value = {}
+    return {
+        "streaming": bool(value.get("streaming", False)),
+        "cancel": bool(value.get("cancel", False)),
+        "model_selection": bool(value.get("model_selection", False)),
+    }
+
+
 def provider_statuses() -> list[dict]:
     result = []
     for source, provider in sorted(_PROVIDERS.items()):
         available = provider.available()
+        models_fn = getattr(provider, "models", None)
+        models = models_fn() if available and callable(models_fn) else []
         result.append({
             "source": source,
             "available": available,
             "reason": None if available else provider.unavailable_reason(),
+            "capabilities": _provider_capabilities(provider),
+            "models": models,
         })
     return result
 
