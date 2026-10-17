@@ -159,8 +159,12 @@ def submit_task(task_id: str) -> None:
 
 
 def _register_defaults() -> None:
+    from backend.providers.codex_local import CodexTaskProvider
+    from backend.providers.ollama_local import OllamaTaskProvider
     from backend.providers.openai_agents import OpenAIAgentsProvider
 
+    register_provider(CodexTaskProvider())
+    register_provider(OllamaTaskProvider())
     register_provider(OpenAIAgentsProvider())
 
 
