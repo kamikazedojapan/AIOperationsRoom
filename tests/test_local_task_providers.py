@@ -227,6 +227,22 @@ def test_qwen_think_guard_keeps_normal_non_thinking_answer():
     assert guard.finish() == "resposta normal sem tags"
 
 
+def test_ollama_system_prompt_includes_project_as_metadata_only():
+    provider = ollama_local.OllamaTaskProvider()
+    prompt = provider._system_prompt(
+        {"agent": "coder"},
+        {
+            "project_id": 7,
+            "project_name": "AI Operations Room",
+            "cwd": r"C:\Users\Marcio\Desktop\AI Engineering\AiOperationsRoom",
+        },
+    )
+
+    assert "AI Operations Room" in prompt
+    assert r"C:\Users\Marcio\Desktop\AI Engineering\AiOperationsRoom" in prompt
+    assert "no implicit filesystem access" in prompt
+
+
 def test_default_registry_contains_local_providers():
     assert task_runner.get_provider("codex") is not None
     assert task_runner.get_provider("ollama") is not None
