@@ -17,6 +17,7 @@ from backend.db import connect, init_db
 from backend.events import ingest
 from backend import projects
 from backend import runs
+from backend import task_store
 from backend.reconcile import reconcile
 from backend.task_api import router as task_router
 
@@ -34,6 +35,8 @@ def database() -> Iterator[sqlite3.Connection]:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    with connect() as con:
+        task_store.recover_interrupted_tasks(con)
     yield
 
 
