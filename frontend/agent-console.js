@@ -60,9 +60,31 @@ function selectedProvider() {
   return providers.find((provider) => provider.source === $('#task-source').value) || null;
 }
 
+function ensureModelSelector() {
+  let field = $('#task-model-field');
+  let select = $('#task-model');
+  if (field && select) return { field, select };
+
+  const source = $('#task-source');
+  const sourceField = source?.closest('label');
+  if (!sourceField) return { field: null, select: null };
+
+  field = document.createElement('label');
+  field.id = 'task-model-field';
+  field.hidden = true;
+  field.append(document.createTextNode('Modelo'));
+
+  select = document.createElement('select');
+  select.id = 'task-model';
+  field.append(select);
+  sourceField.insertAdjacentElement('afterend', field);
+  return { field, select };
+}
+
 function renderModelSelector() {
-  const field = $('#task-model-field');
-  const select = $('#task-model');
+  const { field, select } = ensureModelSelector();
+  if (!field || !select) return;
+
   const provider = selectedProvider();
   const supportsModels = Boolean(
     provider?.available &&
@@ -273,7 +295,9 @@ async function submitTask() {
   const agent = $('#task-agent').value;
   const prompt = $('#task-prompt').value.trim();
   const projectValue = $('#task-project').value;
-  const modelValue = $('#task-model-field').hidden ? '' : $('#task-model').value;
+  const modelField = $('#task-model-field');
+  const modelSelect = $('#task-model');
+  const modelValue = modelField && modelSelect && !modelField.hidden ? modelSelect.value : '';
 
   if (!source) return showNotice('Nenhum provider disponível.', true);
   if (!prompt) return showNotice('Descreva a tarefa antes de executar.', true);
