@@ -246,3 +246,5 @@ def test_agent_console_page_is_served(client: TestClient):
     response = client.get("/agent-console")
     assert response.status_code == 200
     assert "Agent Console" in response.text
+    assert 'id="task-model-field"' in response.text
+    assert 'id="task-model"' in response.text
