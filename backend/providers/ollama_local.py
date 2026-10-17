@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import queue
+import threading
 import time
 from urllib import error, request
 
@@ -88,6 +90,17 @@ class OllamaTaskProvider:
             return "Ollama está ativo, mas nenhum modelo local está instalado."
         return None
 
+    @staticmethod
+    def _pump_response(response, items: queue.Queue[tuple[str, object | None]]) -> None:
+        """Read Ollama's stream off the runner thread so cancellation stays responsive."""
+        try:
+            for raw_line in response:
+                items.put(("line", raw_line))
+        except Exception as exc:  # network/read errors are surfaced on the runner thread
+            items.put(("error", exc))
+        finally:
+            items.put(("done", None))
+
     def run(self, task: dict, emit, is_cancelled) -> ProviderResult:
         installed = self.models()
         if not installed:
@@ -140,12 +153,35 @@ class OllamaTaskProvider:
         output_parts: list[str] = []
         try:
             with request.urlopen(req, timeout=300) as response:
-                for raw_line in response:
+                items: queue.Queue[tuple[str, object | None]] = queue.Queue()
+                reader = threading.Thread(
+                    target=self._pump_response,
+                    args=(response, items),
+                    daemon=True,
+                    name=f"ai-room-ollama-stream-{task['id'][:8]}",
+                )
+                reader.start()
+
+                while True:
                     if is_cancelled():
                         response.close()
                         raise TaskCancelled("Execução local do Ollama cancelada.")
 
-                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    try:
+                        kind, value = items.get(timeout=0.1)
+                    except queue.Empty:
+                        continue
+
+                    if kind == "done":
+                        break
+                    if kind == "error":
+                        if is_cancelled():
+                            raise TaskCancelled("Execução local do Ollama cancelada.")
+                        raise RuntimeError(f"Falha ao ler stream do Ollama: {value}")
+                    if kind != "line" or not isinstance(value, (bytes, bytearray)):
+                        continue
+
+                    line = bytes(value).decode("utf-8", errors="replace").strip()
                     if not line:
                         continue
                     event_payload = json.loads(line)
