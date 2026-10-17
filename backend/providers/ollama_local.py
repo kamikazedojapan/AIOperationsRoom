@@ -93,11 +93,12 @@ class OllamaTaskProvider:
         if not installed:
             raise RuntimeError(self.unavailable_reason() or "Nenhum modelo Ollama disponível.")
 
+        requested = str(task.get("model") or "").strip()
         configured = os.environ.get("AI_OPERATIONS_ROOM_OLLAMA_MODEL", "").strip()
-        model = configured or installed[0]
-        if configured and configured not in installed:
+        model = requested or configured or installed[0]
+        if model not in installed:
             raise RuntimeError(
-                f"Modelo Ollama configurado não está instalado: {configured}. "
+                f"Modelo Ollama não está instalado: {model}. "
                 f"Disponíveis: {', '.join(installed)}"
             )
 
@@ -126,6 +127,7 @@ class OllamaTaskProvider:
                 {"role": "user", "content": task["prompt"]},
             ],
             "stream": True,
+            "think": False,
         }
         encoded = json.dumps(payload).encode("utf-8")
         req = request.Request(
