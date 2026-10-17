@@ -60,6 +60,30 @@ class _FakeCodexProcess:
         return self.returncode
 
 
+class _BlockingOllamaResponse:
+    def __init__(self) -> None:
+        self.released = threading.Event()
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> bytes:
+        self.released.wait(timeout=2)
+        raise StopIteration
+
+    def close(self) -> None:
+        self.closed = True
+        self.released.set()
+
+
 def test_codex_provider_detects_cli(monkeypatch):
     provider = codex_local.CodexTaskProvider()
     monkeypatch.setattr(codex_local.shutil, "which", lambda name: "C:/tools/codex.cmd")
@@ -160,6 +184,31 @@ def test_ollama_provider_requires_a_local_model(monkeypatch):
 
     assert provider.available() is False
     assert "nenhum modelo" in (provider.unavailable_reason() or "").lower()
+
+
+def test_ollama_provider_cancels_without_waiting_for_stream(monkeypatch):
+    provider = ollama_local.OllamaTaskProvider()
+    response = _BlockingOllamaResponse()
+    monkeypatch.setattr(provider, "models", lambda: ["qwen3:4b"])
+    monkeypatch.setattr(
+        ollama_local.request,
+        "urlopen",
+        lambda *args, **kwargs: response,
+    )
+
+    with pytest.raises(task_runner.TaskCancelled):
+        provider.run(
+            {
+                "id": "cancel-ollama",
+                "prompt": "long task",
+                "agent": "general",
+                "model": "qwen3:4b",
+            },
+            lambda *args, **kwargs: None,
+            lambda: True,
+        )
+
+    assert response.closed is True
 
 
 def test_default_registry_contains_local_providers():
