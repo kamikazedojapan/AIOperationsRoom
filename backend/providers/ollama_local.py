@@ -29,6 +29,48 @@ AGENT_INSTRUCTIONS = {
 }
 
 
+class _QwenThinkGuard:
+    """Prevent Qwen3 reasoning text from leaking into task output/timeline.
+
+    Some Ollama/Qwen3 combinations can still place reasoning text in `message.content`
+    even when `think=false`, commonly ending it with `</think>`. For Qwen3 we buffer
+    content until that boundary is known. If no boundary appears, the buffered text is
+    treated as the normal answer at the end of the stream.
+    """
+
+    close_tag = "</think>"
+    open_tag = "<think>"
+
+    def __init__(self) -> None:
+        self._buffer: list[str] = []
+        self._released = False
+
+    def feed(self, content: str) -> str:
+        if self._released:
+            return content
+
+        self._buffer.append(content)
+        combined = "".join(self._buffer)
+        close_at = combined.find(self.close_tag)
+        if close_at < 0:
+            return ""
+
+        self._released = True
+        self._buffer.clear()
+        return combined[close_at + len(self.close_tag):].lstrip()
+
+    def finish(self) -> str:
+        if self._released:
+            return ""
+
+        combined = "".join(self._buffer)
+        self._buffer.clear()
+        open_at = combined.find(self.open_tag)
+        if open_at >= 0:
+            return combined[:open_at].rstrip()
+        return combined
+
+
 def _base_url() -> str:
     value = (
         os.environ.get("AI_OPERATIONS_ROOM_OLLAMA_URL")
@@ -151,6 +193,18 @@ class OllamaTaskProvider:
         )
 
         output_parts: list[str] = []
+        think_guard = _QwenThinkGuard() if model.lower().startswith("qwen3") else None
+
+        def record_output(content: str) -> None:
+            if not content:
+                return
+            output_parts.append(content)
+            emit(
+                "output.delta",
+                source_event="ollama.chat.delta",
+                message=content,
+            )
+
         try:
             with request.urlopen(req, timeout=300) as response:
                 items: queue.Queue[tuple[str, object | None]] = queue.Queue()
@@ -192,12 +246,8 @@ class OllamaTaskProvider:
                     if isinstance(message, dict):
                         content = message.get("content")
                         if isinstance(content, str) and content:
-                            output_parts.append(content)
-                            emit(
-                                "output.delta",
-                                source_event="ollama.chat.delta",
-                                message=content,
-                            )
+                            safe_content = think_guard.feed(content) if think_guard else content
+                            record_output(safe_content)
 
                     if event_payload.get("done"):
                         emit(
@@ -213,6 +263,9 @@ class OllamaTaskProvider:
             raise RuntimeError(f"Ollama HTTP {exc.code}: {detail or exc.reason}") from exc
         except error.URLError as exc:
             raise RuntimeError(f"Falha ao conectar ao Ollama: {exc.reason}") from exc
+
+        if think_guard is not None:
+            record_output(think_guard.finish())
 
         output = "".join(output_parts).strip()
         if not output:
