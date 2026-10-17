@@ -24,6 +24,9 @@ class CodexTaskProvider:
 
     source = "codex"
 
+    def __init__(self) -> None:
+        self._automation_args_cache: tuple[str, ...] | None = None
+
     def _executable(self) -> str | None:
         return shutil.which("codex")
 
@@ -34,6 +37,43 @@ class CodexTaskProvider:
         if self._executable() is None:
             return "Codex CLI não foi encontrado no PATH."
         return None
+
+    def _automation_args(self, executable: str) -> list[str]:
+        """Choose the safest unattended workspace-write mode supported by this CLI.
+
+        Codex 0.163 replaced the former `--full-auto` exec flag with
+        `--approve-for-me`. Older versions may still expose `--full-auto`, so the
+        provider probes `codex exec --help` once and keeps a compatibility fallback.
+        """
+        if self._automation_args_cache is not None:
+            return list(self._automation_args_cache)
+
+        help_text = ""
+        try:
+            result = subprocess.run(
+                [executable, "exec", "--help"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+                check=False,
+            )
+            help_text = f"{result.stdout}\n{result.stderr}"
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+        if "--approve-for-me" in help_text:
+            args = ("--approve-for-me",)
+        elif "--full-auto" in help_text:
+            args = ("--full-auto",)
+        elif "--sandbox" in help_text:
+            args = ("--sandbox", "workspace-write")
+        else:
+            args = ()
+
+        self._automation_args_cache = args
+        return list(args)
 
     def _cwd(self, task: dict) -> str | None:
         project_id = task.get("project_id")
@@ -74,7 +114,7 @@ class CodexTaskProvider:
             executable,
             "exec",
             "--json",
-            "--full-auto",
+            *self._automation_args(executable),
             "--output-last-message",
             str(output_path),
             "-",
