@@ -23,6 +23,9 @@ class FakeProvider:
     def unavailable_reason(self) -> str | None:
         return None
 
+    def models(self) -> list[str]:
+        return ["fake-small", "fake-large"]
+
     def run(self, task: dict, emit, is_cancelled) -> ProviderResult:
         emit(
             "provider.session",
@@ -84,6 +87,7 @@ def test_task_runs_through_provider_neutral_api(client: TestClient):
     assert task["status"] == "completed"
     assert task["source"] == "fake_provider"
     assert task["agent"] == "coder"
+    assert task["model"] is None
     assert task["provider_session_id"] == "fake-session-1"
     assert task["final_output"] == "done: build it"
 
@@ -150,8 +154,45 @@ def test_provider_catalog_exposes_registered_provider(client: TestClient):
         for item in payload["providers"]
     }
 
-    assert providers["fake_provider"]["available"] is True
+    fake = providers["fake_provider"]
+    assert fake["available"] is True
+    assert fake["models"] == ["fake-small", "fake-large"]
+    assert fake["capabilities"]["streaming"] is True
+    assert fake["capabilities"]["cancel"] is True
+    assert fake["capabilities"]["model_selection"] is True
     assert "coder" in payload["agents"]
+
+
+def test_selected_model_is_persisted(client: TestClient):
+    response = client.post(
+        "/api/tasks",
+        json={
+            "source": "fake_provider",
+            "agent": "general",
+            "prompt": "hello model",
+            "model": "fake-large",
+        },
+    )
+
+    assert response.status_code == 202
+    task_id = response.json()["id"]
+    task = client.get(f"/api/tasks/{task_id}").json()
+    assert task["model"] == "fake-large"
+
+
+def test_unknown_model_is_rejected(client: TestClient):
+    response = client.post(
+        "/api/tasks",
+        json={
+            "source": "fake_provider",
+            "agent": "general",
+            "prompt": "hello model",
+            "model": "missing-model",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "Modelo não disponível" in response.json()["detail"]
 
 
 def test_completed_task_can_be_deleted_with_timeline(client: TestClient):
