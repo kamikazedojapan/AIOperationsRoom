@@ -23,6 +23,7 @@ class TaskInput(BaseModel):
     agent: str = Field(min_length=1, max_length=64)
     prompt: str = Field(min_length=1, max_length=100_000)
     project_id: int | None = None
+    model: str | None = Field(default=None, max_length=256)
 
 
 def database():
@@ -61,6 +62,18 @@ def create_task(
             detail=provider.unavailable_reason() or f"Provider indisponível: {source}",
         )
 
+    model = data.model.strip() if isinstance(data.model, str) and data.model.strip() else None
+    if model is not None:
+        models_fn = getattr(provider, "models", None)
+        available_models = models_fn() if callable(models_fn) else []
+        if model not in available_models:
+            detail = (
+                f"Modelo não disponível para {source}: {model}."
+                if not available_models
+                else f"Modelo não disponível para {source}: {model}. Disponíveis: {', '.join(available_models)}"
+            )
+            raise HTTPException(status_code=422, detail=detail)
+
     try:
         task = task_store.create_task(
             con,
@@ -68,6 +81,7 @@ def create_task(
             agent=data.agent,
             prompt=data.prompt,
             project_id=data.project_id,
+            model=model,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
