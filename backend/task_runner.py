@@ -50,16 +50,18 @@ def get_provider(source: str) -> TaskProvider | None:
 
 
 def _provider_capabilities(provider: TaskProvider) -> dict[str, bool]:
+    models_fn = getattr(provider, "models", None)
+    defaults = {
+        "streaming": True,
+        "cancel": True,
+        "model_selection": callable(models_fn),
+    }
     value = getattr(provider, "capabilities", None)
     if callable(value):
         value = value()
-    if not isinstance(value, dict):
-        value = {}
-    return {
-        "streaming": bool(value.get("streaming", False)),
-        "cancel": bool(value.get("cancel", False)),
-        "model_selection": bool(value.get("model_selection", False)),
-    }
+    if isinstance(value, dict):
+        defaults.update({key: bool(item) for key, item in value.items() if key in defaults})
+    return defaults
 
 
 def provider_statuses() -> list[dict]:
