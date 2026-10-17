@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import shutil
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 
 from backend.db import connect
@@ -100,6 +102,45 @@ class CodexTaskProvider:
                 return value
         return None
 
+    @staticmethod
+    def _pump_stdout(stream, lines: queue.Queue[str | None]) -> None:
+        """Read Codex stdout off the runner thread so cancellation never blocks on I/O."""
+        try:
+            for raw_line in stream:
+                lines.put(raw_line)
+        finally:
+            lines.put(None)
+
+    @staticmethod
+    def _stop_process(process: subprocess.Popen, *, windows: bool | None = None) -> None:
+        """Stop the Codex process promptly, including its child tree on Windows."""
+        if process.poll() is not None:
+            return
+
+        use_windows = os.name == "nt" if windows is None else windows
+        if use_windows:
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                try:
+                    process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                return
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
     def run(self, task: dict, emit, is_cancelled) -> ProviderResult:
         executable = self._executable()
         if executable is None:
@@ -138,14 +179,27 @@ class CodexTaskProvider:
             process.stdin.close()
 
             assert process.stdout is not None
-            for raw_line in process.stdout:
+            lines: queue.Queue[str | None] = queue.Queue()
+            reader = threading.Thread(
+                target=self._pump_stdout,
+                args=(process.stdout, lines),
+                daemon=True,
+                name=f"ai-room-codex-stdout-{task['id'][:8]}",
+            )
+            reader.start()
+
+            while True:
                 if is_cancelled():
-                    process.terminate()
-                    try:
-                        process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
+                    self._stop_process(process)
                     raise TaskCancelled("Execução do Codex cancelada.")
+
+                try:
+                    raw_line = lines.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+
+                if raw_line is None:
+                    break
 
                 line = raw_line.strip()
                 if not line:
@@ -182,7 +236,16 @@ class CodexTaskProvider:
                     data=data,
                 )
 
-            return_code = process.wait()
+            while process.poll() is None:
+                if is_cancelled():
+                    self._stop_process(process)
+                    raise TaskCancelled("Execução do Codex cancelada.")
+                try:
+                    process.wait(timeout=0.1)
+                except subprocess.TimeoutExpired:
+                    continue
+
+            return_code = process.returncode
             stderr = process.stderr.read().strip() if process.stderr is not None else ""
             if return_code != 0:
                 detail = stderr[-4000:] if stderr else f"Codex encerrou com código {return_code}."
@@ -201,7 +264,7 @@ class CodexTaskProvider:
             )
         finally:
             if process.poll() is None:
-                process.kill()
+                self._stop_process(process)
             try:
                 output_path.unlink(missing_ok=True)
             except OSError:
