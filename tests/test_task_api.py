@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.task_api as task_api
+from backend import task_store
 from backend.api import app
 from backend.db import connect
 from backend.task_runner import (
@@ -240,6 +241,31 @@ def test_active_task_cannot_be_deleted(client: TestClient, monkeypatch):
     assert deleted.status_code == 409
     assert "ainda está ativa" in deleted.json()["detail"]
     assert client.get(f"/api/tasks/{task_id}").status_code == 200
+
+
+def test_cancelled_stale_task_is_recovered_and_deletable(client: TestClient, monkeypatch):
+    monkeypatch.setattr(task_api, "submit_task", lambda task_id: None)
+    response = client.post(
+        "/api/tasks",
+        json={
+            "source": "fake_provider",
+            "agent": "general",
+            "prompt": "cancel then restart",
+        },
+    )
+    task_id = response.json()["id"]
+
+    cancel = client.post(f"/api/tasks/{task_id}/cancel")
+    assert cancel.status_code == 200
+    assert cancel.json()["cancel_requested"] is True
+    assert cancel.json()["status"] == "queued"
+
+    with connect() as con:
+        assert task_store.recover_interrupted_tasks(con) == [task_id]
+
+    recovered = client.get(f"/api/tasks/{task_id}").json()
+    assert recovered["status"] == "cancelled"
+    assert client.delete(f"/api/tasks/{task_id}").status_code == 200
 
 
 def test_agent_console_page_is_served(client: TestClient):
