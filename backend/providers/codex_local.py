@@ -150,6 +150,7 @@ class CodexTaskProvider:
         os.close(fd)
         output_path = Path(output_name)
         provider_session_id: str | None = None
+        cwd = self._cwd(task)
 
         args = [
             executable,
@@ -163,7 +164,7 @@ class CodexTaskProvider:
 
         process = subprocess.Popen(
             args,
-            cwd=self._cwd(task),
+            cwd=cwd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -216,10 +217,13 @@ class CodexTaskProvider:
                 thread_id = self._thread_id(payload)
                 if thread_id and thread_id != provider_session_id:
                     provider_session_id = thread_id
+                    session_data = {"provider_session_id": thread_id}
+                    if cwd is not None:
+                        session_data["cwd"] = cwd
                     emit(
                         "provider.session",
                         source_event=source_event,
-                        data={"provider_session_id": thread_id},
+                        data=session_data,
                     )
 
                 item = payload.get("item")
@@ -229,6 +233,8 @@ class CodexTaskProvider:
                         data["item_type"] = item["type"]
                     if isinstance(item.get("id"), str):
                         data["item_id"] = item["id"]
+                if cwd is not None:
+                    data["cwd"] = cwd
 
                 emit(
                     "provider.lifecycle",
