@@ -49,14 +49,33 @@ def get_provider(source: str) -> TaskProvider | None:
     return _PROVIDERS.get(source)
 
 
+def _provider_capabilities(provider: TaskProvider) -> dict[str, bool]:
+    models_fn = getattr(provider, "models", None)
+    defaults = {
+        "streaming": True,
+        "cancel": True,
+        "model_selection": callable(models_fn),
+    }
+    value = getattr(provider, "capabilities", None)
+    if callable(value):
+        value = value()
+    if isinstance(value, dict):
+        defaults.update({key: bool(item) for key, item in value.items() if key in defaults})
+    return defaults
+
+
 def provider_statuses() -> list[dict]:
     result = []
     for source, provider in sorted(_PROVIDERS.items()):
         available = provider.available()
+        models_fn = getattr(provider, "models", None)
+        models = models_fn() if available and callable(models_fn) else []
         result.append({
             "source": source,
             "available": available,
             "reason": None if available else provider.unavailable_reason(),
+            "capabilities": _provider_capabilities(provider),
+            "models": models,
         })
     return result
 
@@ -159,8 +178,12 @@ def submit_task(task_id: str) -> None:
 
 
 def _register_defaults() -> None:
+    from backend.providers.codex_local import CodexTaskProvider
+    from backend.providers.ollama_local import OllamaTaskProvider
     from backend.providers.openai_agents import OpenAIAgentsProvider
 
+    register_provider(CodexTaskProvider())
+    register_provider(OllamaTaskProvider())
     register_provider(OpenAIAgentsProvider())
 
 

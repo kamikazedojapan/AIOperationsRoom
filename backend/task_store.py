@@ -23,6 +23,7 @@ def ensure_schema(con: sqlite3.Connection) -> None:
             agent TEXT NOT NULL,
             project_id INTEGER,
             prompt TEXT NOT NULL,
+            model TEXT,
             status TEXT NOT NULL
                 CHECK (status IN ('queued', 'running', 'waiting', 'completed', 'failed', 'cancelled')),
             provider_session_id TEXT,
@@ -54,6 +55,13 @@ def ensure_schema(con: sqlite3.Connection) -> None:
         """
     )
 
+    columns = {
+        row["name"]
+        for row in con.execute("PRAGMA table_info(task)").fetchall()
+    }
+    if "model" not in columns:
+        con.execute("ALTER TABLE task ADD COLUMN model TEXT")
+
 
 def _public(row: sqlite3.Row | None) -> dict | None:
     if row is None:
@@ -70,11 +78,13 @@ def create_task(
     agent: str,
     prompt: str,
     project_id: int | None = None,
+    model: str | None = None,
 ) -> dict:
     ensure_schema(con)
     source = source.strip()
     agent = agent.strip()
     prompt = prompt.strip()
+    model = model.strip() if isinstance(model, str) and model.strip() else None
     if not source:
         raise ValueError("source is required")
     if not agent:
@@ -91,12 +101,22 @@ def create_task(
     con.execute(
         """
         INSERT INTO task (
-            id, source, agent, project_id, prompt, status,
+            id, source, agent, project_id, prompt, model, status,
             provider_session_id, final_output, error,
             cancel_requested, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, ?, ?)
         """,
-        (task_id, source, agent, project_id, prompt, TaskStatus.QUEUED, now, now),
+        (
+            task_id,
+            source,
+            agent,
+            project_id,
+            prompt,
+            model,
+            TaskStatus.QUEUED,
+            now,
+            now,
+        ),
     )
     append_event(con, task_id, "task.queued", message="Task queued.", t=now)
     return get_task(con, task_id)
@@ -114,6 +134,53 @@ def list_tasks(con: sqlite3.Connection, *, limit: int = 50) -> list[dict]:
         (limit,),
     ).fetchall()
     return [_public(row) for row in rows]
+
+
+def recover_interrupted_tasks(con: sqlite3.Connection) -> list[str]:
+    """Finalize tasks that cannot survive an API process restart.
+
+    Agent Console executions run in local worker threads/processes and are not
+    resumable across server restarts. A task with a pending cancellation is restored
+    as cancelled; any other non-final task is marked failed so it never remains
+    permanently undeletable in the UI.
+    """
+    ensure_schema(con)
+    rows = con.execute(
+        """
+        SELECT id, cancel_requested
+        FROM task
+        WHERE status IN ('queued', 'running', 'waiting')
+        ORDER BY created_at
+        """
+    ).fetchall()
+    recovered: list[str] = []
+    for row in rows:
+        task_id = row["id"]
+        if row["cancel_requested"]:
+            set_status(con, task_id, TaskStatus.CANCELLED)
+            append_event(
+                con,
+                task_id,
+                "task.cancelled",
+                message="Task cancelada após reinício do servidor.",
+            )
+        else:
+            message = "Execução interrompida pelo reinício do servidor."
+            set_status(con, task_id, TaskStatus.FAILED, error=message)
+            append_event(con, task_id, "task.failed", message=message)
+        recovered.append(task_id)
+    return recovered
+
+
+def delete_task(con: sqlite3.Connection, task_id: str) -> bool:
+    """Delete one task and its timeline events.
+
+    `PRAGMA foreign_keys = ON` on the shared DB connection makes `task_event`
+    rows cascade automatically through the schema's ON DELETE CASCADE.
+    """
+    ensure_schema(con)
+    cursor = con.execute("DELETE FROM task WHERE id = ?", (task_id,))
+    return cursor.rowcount > 0
 
 
 def set_status(

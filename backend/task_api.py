@@ -23,6 +23,7 @@ class TaskInput(BaseModel):
     agent: str = Field(min_length=1, max_length=64)
     prompt: str = Field(min_length=1, max_length=100_000)
     project_id: int | None = None
+    model: str | None = Field(default=None, max_length=256)
 
 
 def database():
@@ -61,6 +62,18 @@ def create_task(
             detail=provider.unavailable_reason() or f"Provider indisponível: {source}",
         )
 
+    model = data.model.strip() if isinstance(data.model, str) and data.model.strip() else None
+    if model is not None:
+        models_fn = getattr(provider, "models", None)
+        available_models = models_fn() if callable(models_fn) else []
+        if model not in available_models:
+            detail = (
+                f"Modelo não disponível para {source}: {model}."
+                if not available_models
+                else f"Modelo não disponível para {source}: {model}. Disponíveis: {', '.join(available_models)}"
+            )
+            raise HTTPException(status_code=422, detail=detail)
+
     try:
         task = task_store.create_task(
             con,
@@ -68,6 +81,7 @@ def create_task(
             agent=data.agent,
             prompt=data.prompt,
             project_id=data.project_id,
+            model=model,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -88,6 +102,27 @@ def get_task(
     if task is None:
         raise HTTPException(status_code=404, detail="Task não encontrada.")
     return task
+
+
+@router.delete("/api/tasks/{task_id}")
+def delete_task(
+    task_id: str,
+    con: sqlite3.Connection = Depends(database),
+) -> dict:
+    task = task_store.get_task(con, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task não encontrada.")
+
+    if TaskStatus(task["status"]) not in FINAL_TASK_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail="A task ainda está ativa. Cancele ou aguarde a conclusão antes de excluir.",
+        )
+
+    if not task_store.delete_task(con, task_id):
+        raise HTTPException(status_code=404, detail="Task não encontrada.")
+
+    return {"deleted": task_id}
 
 
 @router.get("/api/tasks/{task_id}/events")

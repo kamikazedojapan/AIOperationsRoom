@@ -5,15 +5,21 @@
 .console-sidebar { margin-top: 0; min-height: 680px; }
 .console-sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .console-task-list { display: grid; gap: 8px; }
+.console-task-row { display: grid; grid-template-columns: minmax(0, 1fr) 34px; gap: 6px; align-items: stretch; }
 .console-task-card { width: 100%; border: 1px solid #342d43; background: #120f19; color: #f6f3fb; border-radius: 12px; padding: 12px; text-align: left; display: grid; gap: 8px; }
 .console-task-card:hover, .console-task-card.selected { border-color: #9668f5; background: #20182c; }
+.console-task-delete { border: 1px solid #4a3540; background: #171018; color: #b895a5; border-radius: 10px; font-size: 18px; line-height: 1; cursor: pointer; }
+.console-task-delete:hover:not(:disabled) { border-color: #a84d64; background: #311821; color: #ffb0c0; }
+.console-task-delete:focus-visible { outline: 2px solid #a84d64; outline-offset: 1px; }
+.console-task-delete:disabled { opacity: .32; cursor: not-allowed; }
 .console-task-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .console-task-preview { color: #c7c0d0; font-size: 12px; line-height: 1.45; }
 .console-task-card small { color: #81798f; font-size: 10px; }
 .console-main { min-width: 0; display: grid; gap: 20px; align-content: start; }
 .console-composer, .console-detail { margin-top: 0; }
-.console-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.console-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .console-composer label { display: grid; gap: 8px; font-size: 12px; color: #b8afc5; font-weight: 650; }
+.console-composer label[hidden] { display: none; }
 .console-composer select, .console-composer textarea { width: 100%; color: #f6f3fb; background: #0f0c16; border: 1px solid #453b55; border-radius: 10px; padding: 11px 12px; font: inherit; }
 .console-composer select:focus, .console-composer textarea:focus { outline: 2px solid #8b5bf2; outline-offset: 1px; }
 .console-prompt-label { margin-top: 16px; }
