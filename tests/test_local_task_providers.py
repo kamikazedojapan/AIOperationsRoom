@@ -211,6 +211,22 @@ def test_ollama_provider_cancels_without_waiting_for_stream(monkeypatch):
     assert response.closed is True
 
 
+def test_qwen_think_guard_drops_reasoning_before_close_tag():
+    guard = ollama_local._QwenThinkGuard()
+
+    assert guard.feed("Okay, I should reason about this") == ""
+    assert guard.feed(" carefully.</think>\n\n") == ""
+    assert guard.feed("teste de persistência concluído") == "teste de persistência concluído"
+    assert guard.finish() == ""
+
+
+def test_qwen_think_guard_keeps_normal_non_thinking_answer():
+    guard = ollama_local._QwenThinkGuard()
+
+    assert guard.feed("resposta normal sem tags") == ""
+    assert guard.finish() == "resposta normal sem tags"
+
+
 def test_default_registry_contains_local_providers():
     assert task_runner.get_provider("codex") is not None
     assert task_runner.get_provider("ollama") is not None
