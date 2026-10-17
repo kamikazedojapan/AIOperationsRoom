@@ -116,6 +116,17 @@ def list_tasks(con: sqlite3.Connection, *, limit: int = 50) -> list[dict]:
     return [_public(row) for row in rows]
 
 
+def delete_task(con: sqlite3.Connection, task_id: str) -> bool:
+    """Delete one task and its timeline events.
+
+    `PRAGMA foreign_keys = ON` on the shared DB connection makes `task_event`
+    rows cascade automatically through the schema's ON DELETE CASCADE.
+    """
+    ensure_schema(con)
+    cursor = con.execute("DELETE FROM task WHERE id = ?", (task_id,))
+    return cursor.rowcount > 0
+
+
 def set_status(
     con: sqlite3.Connection,
     task_id: str,
