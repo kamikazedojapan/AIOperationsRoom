@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from backend import task_runner
 from backend.providers import codex_local, ollama_local
 
@@ -18,6 +20,48 @@ def test_codex_provider_reports_missing_cli(monkeypatch):
 
     assert provider.available() is False
     assert "PATH" in (provider.unavailable_reason() or "")
+
+
+def test_codex_provider_prefers_approve_for_me(monkeypatch):
+    provider = codex_local.CodexTaskProvider()
+    monkeypatch.setattr(
+        codex_local.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout="--approve-for-me\n--sandbox <MODE>",
+            stderr="",
+        ),
+    )
+
+    assert provider._automation_args("codex") == ["--approve-for-me"]
+
+
+def test_codex_provider_falls_back_to_legacy_full_auto(monkeypatch):
+    provider = codex_local.CodexTaskProvider()
+    monkeypatch.setattr(
+        codex_local.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout="--full-auto\n--sandbox <MODE>",
+            stderr="",
+        ),
+    )
+
+    assert provider._automation_args("codex") == ["--full-auto"]
+
+
+def test_codex_provider_falls_back_to_workspace_write(monkeypatch):
+    provider = codex_local.CodexTaskProvider()
+    monkeypatch.setattr(
+        codex_local.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout="--sandbox <MODE>",
+            stderr="",
+        ),
+    )
+
+    assert provider._automation_args("codex") == ["--sandbox", "workspace-write"]
 
 
 def test_ollama_provider_exposes_installed_models(monkeypatch):
