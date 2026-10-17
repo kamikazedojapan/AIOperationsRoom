@@ -1,6 +1,6 @@
 # AI Operations Room
 
-> Versão atual: **v0.7.1** — núcleo multi-provider + OpenAI Agents API + Agent Console / Task Runner + hotfix dos hooks Codex no Windows.
+> Versão atual: **v0.8.0** — Agent Console multi-provider com Codex Local e Ollama Local, seleção de modelo, cancelamento responsivo, persistência e projeto/CWD.
 
 Uma sala local para observar sessões e subagentes de diferentes provedores de IA e, pela **Agent Console**, iniciar tarefas explicitamente por um runner provider-neutral.
 
@@ -15,8 +15,9 @@ Os dados locais ficam em SQLite e a interface é servida em `127.0.0.1`.
 
 - Python 3.12 ou superior
 - [`uv`](https://docs.astral.sh/uv/getting-started/installation/) disponível no terminal
-- opcionalmente Claude Code e/ou Codex para observabilidade real dessas superfícies
-- `OPENAI_API_KEY` para executar tasks pela integração OpenAI Agents API
+- Codex CLI autenticado, para tasks locais via Codex e/ou observabilidade por hooks
+- Ollama local com ao menos um modelo instalado, para tasks locais via Ollama
+- `OPENAI_API_KEY`, opcionalmente, para executar tasks pela integração OpenAI Agents API
 
 ## Início rápido
 
@@ -31,7 +32,7 @@ Abra:
 - Projetos: `http://127.0.0.1:8765/projetos`
 - Agent Console: `http://127.0.0.1:8765/agent-console`
 
-A tela **Projetos** associa diretórios locais aos nomes mostrados no Escritório. O caminho mais específico vence.
+A tela **Projetos** associa diretórios locais aos nomes mostrados no Escritório e também pode fornecer contexto explícito para tasks da Agent Console.
 
 ## Claude Code
 
@@ -48,20 +49,32 @@ O hook registra somente metadados operacionais como IDs, tipo de agente, diretó
 
 ## Codex
 
-O AI Operations Room também possui integração baseada nos lifecycle hooks oficiais do Codex.
+O AI Operations Room possui integração baseada nos lifecycle hooks oficiais do Codex e também um `CodexTaskProvider` para a Agent Console.
 
 ```powershell
 uv run python -m backend.cli codex-hooks-install
 uv run python -m backend.cli codex-hooks-remove
 ```
 
-Depois da instalação, abra `/hooks` no Codex e revise/confie nas definições registradas. No Windows, o instalador cria automaticamente um pequeno wrapper `.cmd` em `~/.ai-operations-room` para evitar falhas do parser de hooks com caminhos entre aspas e espaços. O fluxo real foi validado com Codex CLI e sessão `codex` aparecendo no Operations Room.
+Depois da instalação, abra `/hooks` no Codex e revise/confie nas definições registradas. No Windows, o instalador cria automaticamente um pequeno wrapper `.cmd` em `~/.ai-operations-room` para evitar falhas do parser de hooks com caminhos entre aspas e espaços.
+
+Na Agent Console, o Codex pode executar uma task local no diretório do projeto selecionado. O provider detecta os flags de automação suportados pela versão instalada do CLI e mantém cancelamento cooperativo do processo.
 
 Consulte [`docs/CODEX_INTEGRATION.md`](docs/CODEX_INTEGRATION.md) para o mapeamento e as limitações atuais.
 
+## Ollama Local
+
+O `OllamaTaskProvider` detecta o serviço local, lista os modelos instalados e expõe seleção de modelo diretamente na Agent Console.
+
+Por padrão o projeto usa `http://127.0.0.1:11434`. É possível sobrescrever com `AI_OPERATIONS_ROOM_OLLAMA_URL` ou `OLLAMA_HOST`.
+
+O modelo pode ser escolhido pela interface. Como fallback, `AI_OPERATIONS_ROOM_OLLAMA_MODEL` pode definir o modelo preferido.
+
+Quando um projeto é selecionado, Ollama recebe apenas nome e CWD como **metadado/contexto**. Isso não concede acesso implícito ao filesystem e o provider instrui o modelo a não alegar leitura de arquivos que não tenham sido fornecidos explicitamente.
+
 ## OpenAI Agents API
 
-A primeira integração OpenAI escolhida é a **Agents API**, porque ela expõe sessões duráveis, turnos, eventos de streaming e subagentes observáveis sem depender de eventos internos do ChatGPT comum.
+A integração OpenAI usa a **Agents API**, com sessões duráveis, turnos, streaming e subagentes observáveis.
 
 Configure a chave no ambiente antes de iniciar o servidor:
 
@@ -70,9 +83,9 @@ $env:OPENAI_API_KEY="sua-chave"
 uv run python -m backend.cli serve
 ```
 
-A Agent Console utiliza por padrão um sandbox `openai_hosted` e o modelo configurado por `AI_OPERATIONS_ROOM_OPENAI_MODEL` (padrão atual: `gpt-6-astra`).
+A Agent Console utiliza por padrão um sandbox `openai_hosted` e o modelo configurado por `AI_OPERATIONS_ROOM_OPENAI_MODEL`.
 
-O projeto selecionado na Agent Console é apenas metadado local nesta versão. A pasta do seu projeto **não é enviada automaticamente** ao sandbox remoto.
+O projeto selecionado na Agent Console é apenas metadado local para essa integração. A pasta do seu projeto **não é enviada automaticamente** ao sandbox remoto.
 
 Consulte [`docs/OPENAI_INTEGRATION.md`](docs/OPENAI_INTEGRATION.md) e [`docs/AGENT_CONSOLE.md`](docs/AGENT_CONSOLE.md).
 
@@ -80,15 +93,17 @@ Consulte [`docs/OPENAI_INTEGRATION.md`](docs/OPENAI_INTEGRATION.md) e [`docs/AGE
 
 A Agent Console permite:
 
-- escolher provider, agente e projeto;
-- criar uma task provider-neutral;
+- detectar dinamicamente providers disponíveis e suas capacidades;
+- escolher provider, agente, projeto e, quando suportado, modelo;
+- executar tasks via Codex Local, Ollama Local ou OpenAI Agents API;
 - acompanhar `queued`, `running`, `waiting`, `completed`, `failed` ou `cancelled`;
 - acompanhar uma timeline incremental de eventos;
-- solicitar cancelamento;
-- ver a resposta final;
-- consultar histórico local de tasks.
+- solicitar cancelamento sem acoplamento específico na UI;
+- persistir histórico, timeline, resposta final e modelo selecionado em SQLite;
+- recuperar tasks interrompidas por restart para um estado final coerente;
+- excluir tasks finalizadas com remoção em cascata da timeline.
 
-A primeira versão usa polling de aproximadamente 1 segundo. O contrato de eventos da task é cursor-based, então SSE/WebSocket pode substituir o transporte posteriormente sem mudar a semântica do runner.
+A interface usa polling de aproximadamente 1 segundo. O contrato de eventos da task é cursor-based, então SSE/WebSocket pode substituir o transporte posteriormente sem mudar a semântica do runner.
 
 ## Persistência e identidade
 
@@ -100,7 +115,7 @@ codex:abc123
 openai_api:abc123
 ```
 
-Isso evita colisões entre provedores. O SQLite mantém separadamente sessões/eventos/execuções globais e as tabelas `task`/`task_event` da Agent Console.
+Tasks locais usam seus próprios IDs e mantêm `source`, `provider_session_id`, modelo e timeline separados. O SQLite mantém separadamente sessões/eventos/execuções globais e as tabelas `task`/`task_event` da Agent Console.
 
 Por padrão os dados ficam em `~/.ai-operations-room`. Use `AI_OPERATIONS_ROOM_DATA_DIR` para apontar outra pasta.
 
@@ -139,9 +154,10 @@ Consulte também [`ARCHITECTURE.md`](ARCHITECTURE.md), [`DEVELOPMENT.md`](DEVELO
 
 ## Limites atuais
 
-- validações ponta a ponta reais dependem de acesso/autenticação de cada provedor;
-- a Agent Console executa primeiro via OpenAI Agents API; Claude/Codex ainda são fontes de observabilidade, não `TaskProvider`s do console;
-- seleção de projeto na Agent Console não transfere arquivos locais ao provider;
+- validações ponta a ponta reais dependem da instalação/autenticação de cada provider;
+- OpenAI Agents API depende de quota/billing da API, separada da assinatura do ChatGPT;
+- Ollama recebe contexto de projeto, mas não ganha acesso automático aos arquivos locais;
+- Codex Local depende do CLI instalado e autenticado na máquina;
 - o serviço é local e não fornece autenticação nem acesso remoto;
 - macOS e Linux ainda não possuem o mesmo nível de validação do fluxo Windows.
 
